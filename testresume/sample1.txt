@@ -1,0 +1,60 @@
+{
+    "resume": {
+        "contact_info": {
+            "name": "Alex Rodriguez",
+            "email": "alex.rodriguez@email.com",
+            "phone": "555-123-4567",
+            "location": "San Francisco, CA"
+        },
+        "skills": [
+            "Python", "JavaScript", "React", "Node.js", "AWS", "Docker", 
+            "Microservices", "CI/CD", "Git", "MongoDB"
+        ],
+        "experience": [
+            {
+                "title": "Senior Software Engineer",
+                "company": "TechCorp Inc.",
+                "dates": "2020-01 to Present",
+                "duration": "3 years 4 months",
+                "descriptions": [
+                    "Led development of microservices architecture using Node.js and Docker",
+                    "Implemented CI/CD pipeline reducing deployment time by 40%",
+                    "Mentored junior developers on best practices and code reviews"
+                ]
+            },
+            {
+                "title": "Software Developer",
+                "company": "CodeWorks LLC",
+                "dates": "2017-05 to 2019-12",
+                "duration": "2 years 7 months",
+                "descriptions": [
+                    "Developed React frontend applications for e-commerce clients",
+                    "Built RESTful APIs using Python/Django",
+                    "Implemented automated testing increasing code coverage by 60%"
+                ]
+            }
+        ],
+        "education": [
+            {
+                "degree": "B.S. Computer Science",
+                "institution": "University of California, Berkeley",
+                "year": "2017"
+            }
+        ],
+        "raw_text": """Alex Rodriguez\nSan Francisco, CA | 555-123-4567 | alex.rodriguez@email.com\n\nSKILLS\nPython, JavaScript, React, Node.js, AWS, Docker, Microservices, CI/CD, Git, MongoDB\n\nEXPERIENCE\nSenior Software Engineer | TechCorp Inc. | Jan 2020 - Present\n• Led development of microservices architecture using Node.js and Docker\n• Implemented CI/CD pipeline reducing deployment time by 40%\n• Mentored junior developers on best practices and code reviews\n\nSoftware Developer | CodeWorks LLC | May 2017 - Dec 2019\n• Developed React frontend applications for e-commerce clients\n• Built RESTful APIs using Python/Django\n• Implemented automated testing increasing code coverage by 60%\n\nEDUCATION\nB.S. Computer Science | University of California, Berkeley | 2017"""
+    },
+    "jd": {
+        "title": "Senior Full Stack Engineer",
+        "company": "InnovateTech Solutions",
+        "required_skills": [
+            "JavaScript", "React", "Node.js", "AWS", "Kubernetes", "GraphQL", 
+            "PostgreSQL", "Agile development"
+        ],
+        "preferred_skills": [
+            "TypeScript", "Redis", "CI/CD experience", "System design"
+        ],
+        "experience_required": "5+ years of software development experience",
+        "education_required": "Bachelor's degree in Computer Science or related field",
+        "raw_text": """Senior Full Stack Engineer\nInnovateTech Solutions\n\nAbout the Role:\nWe are seeking an experienced Senior Full Stack Engineer to join our growing team. You will be responsible for developing and maintaining web applications, collaborating with cross-functional teams, and mentoring junior developers.\n\nRequired Skills & Experience:\n• 5+ years of software development experience\n• Strong proficiency in JavaScript and modern frameworks (React)\n• Experience with Node.js backend development\n• Familiarity with AWS cloud services\n• Knowledge of Kubernetes and container orchestration\n• Experience with GraphQL APIs\n• PostgreSQL database design and optimization\n• Agile development methodologies\n\nPreferred Qualifications:\n• TypeScript experience\n• Redis or other caching solutions\n• CI/CD implementation experience\n• System design and architecture planning\n\nEducation:\nBachelor's degree in Computer Science or related field\n\nWe offer competitive salary, benefits, and a collaborative work environment focused on innovation."""
+    }
+}

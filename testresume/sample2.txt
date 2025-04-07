@@ -1,0 +1,61 @@
+{
+    "resume": {
+        "contact_info": {
+            "name": "Jamie Wilson",
+            "email": "jamie.wilson@email.com",
+            "phone": "555-987-6543",
+            "location": "Chicago, IL"
+        },
+        "skills": [
+            "Digital Marketing", "Content Strategy", "SEO", "Social Media Management",
+            "Email Marketing", "Google Analytics", "A/B Testing", "Campaign Management",
+            "Adobe Creative Suite", "Marketing Automation"
+        ],
+        "experience": [
+            {
+                "title": "Marketing Manager",
+                "company": "Retail Brands Inc.",
+                "dates": "2019-03 to Present",
+                "duration": "4 years 1 month",
+                "descriptions": [
+                    "Managed social media presence increasing engagement by 45%",
+                    "Led email marketing campaigns with 28% open rate (industry avg 18%)",
+                    "Developed content strategy resulting in 35% increase in organic traffic"
+                ]
+            },
+            {
+                "title": "Digital Marketing Specialist",
+                "company": "Agency Partners LLC",
+                "dates": "2016-08 to 2019-02",
+                "duration": "2 years 6 months",
+                "descriptions": [
+                    "Executed PPC campaigns achieving 22% reduction in cost per acquisition",
+                    "Optimized website content for SEO resulting in 40% traffic increase",
+                    "Managed social media accounts for 5 major clients"
+                ]
+            }
+        ],
+        "education": [
+            {
+                "degree": "B.A. Marketing",
+                "institution": "University of Illinois",
+                "year": "2016"
+            }
+        ],
+        "raw_text": """Jamie Wilson\nChicago, IL | 555-987-6543 | jamie.wilson@email.com\n\nSKILLS\nDigital Marketing, Content Strategy, SEO, Social Media Management, Email Marketing, Google Analytics, A/B Testing, Campaign Management, Adobe Creative Suite, Marketing Automation\n\nEXPERIENCE\nMarketing Manager | Retail Brands Inc. | Mar 2019 - Present\n• Managed social media presence increasing engagement by 45%\n• Led email marketing campaigns with 28% open rate (industry avg 18%)\n• Developed content strategy resulting in 35% increase in organic traffic\n\nDigital Marketing Specialist | Agency Partners LLC | Aug 2016 - Feb 2019\n• Executed PPC campaigns achieving 22% reduction in cost per acquisition\n• Optimized website content for SEO resulting in 40% traffic increase\n• Managed social media accounts for 5 major clients\n\nEDUCATION\nB.A. Marketing | University of Illinois | 2016"""
+    },
+    "jd": {
+        "title": "Senior Marketing Manager",
+        "company": "Consumer Brands Co.",
+        "required_skills": [
+            "Digital Marketing", "Brand Strategy", "SEO/SEM", "Budget Management", 
+            "Team Leadership", "Marketing Analytics", "CRM Software"
+        ],
+        "preferred_skills": [
+            "Hubspot", "Salesforce", "E-commerce experience", "Paid Social Media"
+        ],
+        "experience_required": "6+ years of marketing experience",
+        "education_required": "Bachelor's degree in Marketing, Business, or related field",
+        "raw_text": """Senior Marketing Manager\nConsumer Brands Co.\n\nAbout the Role:\nWe are looking for a Senior Marketing Manager to lead our marketing initiatives and team. The ideal candidate will have a strong background in digital marketing, brand development, and team leadership.\n\nRequired Skills & Experience:\n• 6+ years of marketing experience with progressive responsibility\n• Expertise in digital marketing channels and brand strategy development\n• Strong understanding of SEO/SEM best practices\n• Experience managing marketing budgets and reporting ROI\n• Team leadership and management experience\n• Proficiency with marketing analytics tools and reporting\n• Experience with CRM software and customer journey mapping\n\nPreferred Qualifications:\n• Hubspot and/or Salesforce experience\n• E-commerce marketing experience\n• Paid social media campaign management\n• Product marketing experience\n\nEducation:\nBachelor's degree in Marketing, Business, or related field\n\nWe offer competitive compensation, comprehensive benefits, and opportunities for advancement."""
+    }
+}

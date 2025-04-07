@@ -1,5 +1,5 @@
 api/env
-
+testresume/scoring/.venv
 # Python
 __pycache__/
 *.py[cod]

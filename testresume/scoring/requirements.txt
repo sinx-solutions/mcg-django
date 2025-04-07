@@ -1,0 +1,8 @@
+numpy<2.0
+huggingface-hub<0.18
+# Core NLP and scoring libraries
+scikit-learn==1.3.0           # For TF-IDF and vector operations
+spacy==3.6.1                  # For NLP processing
+sentence-transformers==2.2.2  # For semantic embeddings
+rank-bm25==0.2.2              # For BM25 ranking algorithm
+nltk==3.8.1                   # For text preprocessing 
