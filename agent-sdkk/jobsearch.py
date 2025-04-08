@@ -80,12 +80,10 @@ def search_jobs_via_serpapi(query: str, location: Optional[str] = None) -> str:
                 summary += f" in '{location}'"
             summary += ". Here are the top results I could retrieve:\n\n"
 
-            for i, job in enumerate(job_results[:5]): # Show top 5 with links
+            for i, job in enumerate(job_results[:5]): # Show top 5 with apply links
                 title = job.get('title', 'N/A')
                 company = job.get('company_name', 'N/A')
                 loc = job.get('location', 'N/A')
-                # Corrected link extraction: Use 'share_link' based on test_serpapi_google_jobs.py
-                google_link = job.get('share_link', 'No direct link found') 
 
                 detected_extensions = job.get('detected_extensions', {})
                 posted_at = detected_extensions.get('posted_at', 'N/A')
@@ -93,7 +91,18 @@ def search_jobs_via_serpapi(query: str, location: Optional[str] = None) -> str:
 
                 summary += f"{i+1}. {title} at {company} ({loc})\n"
                 summary += f"   - Posted: {posted_at}, Type: {schedule_type}\n"
-                summary += f"   - Link: {google_link}\n\n" # Add the Google link
+
+                # Extract and add Apply Options links
+                apply_options = job.get('apply_options', [])
+                if apply_options:
+                    summary += "   - Apply Links:\n"
+                    for option in apply_options:
+                        apply_title = option.get('title', 'Apply')
+                        apply_link = option.get('link', 'N/A')
+                        summary += f"     - {apply_title}: {apply_link}\n"
+                else:
+                    summary += "   - Apply Links: Not found in results\n"
+                summary += "\n" # Add space after each job entry
 
             if len(job_results) > 5:
                 summary += "  ... (more results might be available)\n"
