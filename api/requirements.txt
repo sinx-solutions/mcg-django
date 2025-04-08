@@ -244,7 +244,6 @@ pdfreader==0.1.12
 pdfrw==0.4
 Pebble==5.1.0
 pexpect==4.9.0
-phonepe-sdk==1.1.0
 pickleshare==0.7.5
 pikepdf==7.2.0
 pillow==11.1.0
