@@ -13,6 +13,7 @@ import logging
 import math
 from datetime import datetime
 import calendar
+from accelerate import init_empty_weights
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -287,11 +288,63 @@ class ATSScorer:
     def calculate_experience_match(self, resume_data, job_data):
         jd_years_required = self.extract_years_of_experience(job_data.get('raw_text', ''))
         logger.debug(f"JD requires ~{jd_years_required} years based on text extraction.")
-        years_from_dates = 0
-        years_from_duration = 0
-        years_from_raw_text = 0
+        
+        # Initialize years calculated from different sources
+        years_from_structured_dates = 0
+        # years_from_duration = 0 # Keep commented if duration field not used from DB
+        # years_from_raw_text = 0 # Keep commented if we prioritize structured data
+
+        # --- NEW LOGIC: Prioritize structured start_date/end_date from DB --- START ---
         if 'experience' in resume_data and isinstance(resume_data['experience'], list):
-            logger.debug("Attempting experience calculation from structured dates...")
+            logger.debug("Attempting experience calculation from structured start_date/end_date fields...")
+            calculated_total_duration = 0
+            now = datetime.now()
+
+            for job in resume_data['experience']:
+                if isinstance(job, dict):
+                    start_date_str = job.get('start_date')
+                    end_date_str = job.get('end_date') # Can be None or date string
+
+                    if start_date_str: # Must have a start date
+                        try:
+                            start_date_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
+                            
+                            if end_date_str:
+                                end_date_dt = datetime.strptime(end_date_str, '%Y-%m-%d')
+                            else:
+                                # If end_date is None or empty string, assume 'Present'
+                                end_date_dt = now
+
+                            if end_date_dt >= start_date_dt:
+                                delta = end_date_dt - start_date_dt
+                                duration = delta.days / 365.25 # Approximate years
+                                logger.debug(f"  Calculated duration {duration:.2f} years for job '{job.get('position')}' ({start_date_str} to {end_date_str or 'Present'}).")
+                                calculated_total_duration += duration
+                            else:
+                                logger.warning(f"  End date {end_date_str} is before start date {start_date_str} for job '{job.get('position')}'. Skipping duration.")
+
+                        except ValueError as date_err:
+                            logger.warning(f"  Could not parse YYYY-MM-DD date for job '{job.get('position')}': '{start_date_str}' or '{end_date_str}'. Error: {date_err}")
+                        except Exception as e:
+                             logger.error(f"  Unexpected error processing dates for job '{job.get('position')}': {e}")
+                    else:
+                         logger.warning(f"  Missing start_date for job '{job.get('position')}'. Skipping duration calculation.")
+            
+            if calculated_total_duration > 0:
+                years_from_structured_dates = math.floor(calculated_total_duration)
+                logger.debug(f"Total experience from structured start/end dates: {years_from_structured_dates} years (floored).")
+            else:
+                 logger.debug("Could not calculate any duration from structured start/end dates.")
+        # --- NEW LOGIC: Prioritize structured start_date/end_date from DB --- END ---
+
+        # --- ORIGINAL LOGIC (Commented out or used as fallback) --- START ---
+        # Original logic tried parsing 'dates' string and 'duration' string
+        # We can keep it commented out if the new logic is sufficient
+        # Or add it as a fallback if years_from_structured_dates is 0
+        '''
+        years_from_dates_string_parse = 0 # Original variable name
+        if years_from_structured_dates == 0 and 'experience' in resume_data and isinstance(resume_data['experience'], list):
+            logger.debug("Fallback: Attempting experience calculation from legacy 'dates' string parsing...")
             calculated_total_duration = 0
             date_separators = r'\s+(?:to|-|until|–)\s+'
             for job in resume_data['experience']:
@@ -299,44 +352,70 @@ class ATSScorer:
                     date_parts = re.split(date_separators, job['dates'], maxsplit=1)
                     if len(date_parts) == 2:
                         start_str, end_str = date_parts[0].strip(), date_parts[1].strip()
-                        duration = calculate_years_from_dates(start_str, end_str)
+                        duration = calculate_years_from_dates(start_str, end_str) # Uses the old helper
                         if duration > 0:
-                            logger.debug(f" Calculated duration {duration:.2f} years for '{job['dates']}'.")
+                            logger.debug(f" Calculated duration {duration:.2f} years for legacy 'dates': '{job['dates']}'.")
                             calculated_total_duration += duration
                         else:
-                            logger.warning(f"Could not calculate valid duration for dates: {job['dates']}")
+                            logger.warning(f"Could not calculate valid duration for legacy dates string: {job['dates']}")
                     else:
-                        logger.warning(f"Could not split dates string '{job['dates']}' into start/end using separators: {date_separators}")
+                        logger.warning(f"Could not split legacy dates string '{job['dates']}' into start/end using separators: {date_separators}")
             if calculated_total_duration > 0:
-                years_from_dates = math.floor(calculated_total_duration)
-                logger.debug(f"Total experience from dates: {years_from_dates} years (floored).")
-        if years_from_dates == 0 and 'experience' in resume_data and isinstance(resume_data['experience'], list):
-            logger.debug("Attempting experience calculation from structured duration fields...")
+                years_from_dates_string_parse = math.floor(calculated_total_duration)
+                logger.debug(f"Total experience from legacy 'dates' string parsing: {years_from_dates_string_parse} years (floored).")
+
+        years_from_duration_field = 0 # Original variable name
+        if years_from_structured_dates == 0 and years_from_dates_string_parse == 0 and 'experience' in resume_data and isinstance(resume_data['experience'], list):
+            logger.debug("Fallback: Attempting experience calculation from legacy 'duration' fields...")
             calculated_total_duration = 0
             for job in resume_data['experience']:
                 if isinstance(job, dict) and 'duration' in job:
-                    duration_years = parse_duration(job['duration'])
+                    duration_years = parse_duration(job['duration']) # Uses the old helper
                     if duration_years > 0:
-                        logger.debug(f" Parsed duration field '{job['duration']}' as {duration_years:.2f} years.")
+                        logger.debug(f" Parsed legacy duration field '{job['duration']}' as {duration_years:.2f} years.")
                         calculated_total_duration += duration_years
             if calculated_total_duration > 0:
-                years_from_duration = math.floor(calculated_total_duration)
-                logger.debug(f"Total experience from duration fields: {years_from_duration} years (floored).")
-        years_from_raw_text = self.extract_years_of_experience(resume_data.get('raw_text', ''))
-        logger.debug(f"Experience years found in resume raw text: {years_from_raw_text}")
-        resume_total_years = max(years_from_dates, years_from_duration, years_from_raw_text)
-        logger.info(f"Experience: JD requires ~{jd_years_required} years. Resume best estimate: ~{resume_total_years} years.")
+                years_from_duration_field = math.floor(calculated_total_duration)
+                logger.debug(f"Total experience from legacy 'duration' fields: {years_from_duration_field} years (floored).")
+        '''
+        # --- ORIGINAL LOGIC (Commented out or used as fallback) --- END ---
+
+        # --- Fallback to Raw Text Extraction (Optional) ---
+        # Only use if structured data yields 0 years
+        years_from_raw_text_extract = 0
+        if years_from_structured_dates == 0: # and years_from_dates_string_parse == 0 and years_from_duration_field == 0:
+            logger.debug("Fallback: Attempting experience calculation from resume raw text extraction...")
+            years_from_raw_text_extract = self.extract_years_of_experience(resume_data.get('raw_text', ''))
+            logger.debug(f"Experience years found in resume raw text: {years_from_raw_text_extract}")
+
+        # --- Determine Final Resume Years --- #
+        # Prioritize the calculation from structured start/end dates
+        resume_total_years = max(years_from_structured_dates, years_from_raw_text_extract)
+        # If using other fallbacks, include them in max():
+        # resume_total_years = max(years_from_structured_dates, years_from_dates_string_parse, years_from_duration_field, years_from_raw_text_extract)
+
+        logger.info(f"Experience: JD requires ~{jd_years_required} years. Resume best estimate: ~{resume_total_years} years (from structured dates: {years_from_structured_dates}, from raw text: {years_from_raw_text_extract})")
+
+        # --- Calculate Score --- #
         if jd_years_required == 0:
+            # If JD doesn't specify years, assume candidate meets requirement
+            logger.info("JD does not specify required years of experience. Score: 1.0")
             return 1.0
+        
         if resume_total_years == 0:
-            logger.warning("Could not determine resume years of experience from any source.")
-            return 0.1
+            logger.warning("Could not determine resume years of experience from any reliable source.")
+            # Assign a low score if JD requires experience but resume shows none
+            return 0.1 
+
+        # Calculate score based on ratio, capping at 1.0
         if resume_total_years >= jd_years_required:
-            return 1.0
+            score = 1.0
         else:
-            score = resume_total_years / jd_years_required
-            logger.info(f"Experience score: {resume_total_years} / {jd_years_required} = {score:.2f}")
-            return score
+            score = resume_total_years / jd_years_required 
+        
+        score = max(0.0, min(score, 1.0)) # Ensure score is between 0 and 1
+        logger.info(f"Experience score: {resume_total_years} / {jd_years_required} = {score:.2f}")
+        return score
     
     def extract_education_level(self, text):
         education_patterns = [

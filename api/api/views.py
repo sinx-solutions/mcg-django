@@ -18,6 +18,13 @@ import google.generativeai as genai
 import requests # Added for OpenRouter
 from pydantic import ValidationError # Keep for potential validation if needed, though OpenRouter handles it
 from datetime import datetime
+import logging # Import logging
+# Configure logging
+logger = logging.getLogger(__name__)
+
+
+# Define logger at module level
+logger = logging.getLogger(__name__)
 
 from .models import (
     Resume,
@@ -1365,3 +1372,100 @@ def save_parsed_resume(request):
             {"error": f"Error saving resume: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+        
+@api_view(['POST'])
+def score_resume(request, resume_id):
+    """
+    Score a resume against a job description.
+    
+    Takes a resume_id and job description data, then returns an ATS score.
+    """
+    try:
+        # 1. Fetch Resume from DB
+        try:
+            resume_obj = Resume.objects.get(id=resume_id)
+            # Serialize the data
+            serializer = ResumeDetailSerializer(resume_obj)
+            resume_data = serializer.data
+        except Resume.DoesNotExist:
+            return Response(
+                {"error": f"Resume with ID {resume_id} not found in the database."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+        # 2. Get Job Description data from request
+        job_data = request.data
+        if not job_data:
+            return Response(
+                {"error": "No job description data provided in request."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # Ensure job_data has required fields
+        if not job_data.get('raw_text'):
+            return Response(
+                {"error": "Job description must include 'raw_text' field."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        # 3. Preprocess Resume Data for Scorer
+        resume_data_for_scorer = resume_data.copy()
+        
+        # Rename 'work_experiences' to 'experience' for scorer compatibility
+        if 'work_experiences' in resume_data_for_scorer:
+            resume_data_for_scorer['experience'] = resume_data_for_scorer.pop('work_experiences')
+        else:
+            resume_data_for_scorer['experience'] = []
+            
+        # Construct substitute raw_text from structured data if not present
+        if not resume_data_for_scorer.get('raw_text'):
+            resume_raw_text_parts = [
+                resume_data_for_scorer.get('summary', ''),
+                resume_data_for_scorer.get('job_title', ''),
+            ]
+            # Use 'experience' key now
+            for exp in resume_data_for_scorer.get('experience', []):
+                resume_raw_text_parts.append(exp.get('position', ''))
+                resume_raw_text_parts.append(exp.get('company', ''))
+                resume_raw_text_parts.append(exp.get('description', ''))
+            for edu in resume_data_for_scorer.get('educations', []):
+                resume_raw_text_parts.append(edu.get('degree', ''))
+                resume_raw_text_parts.append(edu.get('school', ''))
+            for proj in resume_data_for_scorer.get('projects', []):
+                resume_raw_text_parts.append(proj.get('title', ''))
+                resume_raw_text_parts.append(proj.get('description', ''))
+            for cert in resume_data_for_scorer.get('certifications', []):
+                resume_raw_text_parts.append(cert.get('name', ''))
+                resume_raw_text_parts.append(cert.get('issuer', ''))
+            for section in resume_data_for_scorer.get('custom_sections', []):
+                resume_raw_text_parts.append(section.get('title',''))
+                for item in section.get('items', []):
+                    resume_raw_text_parts.append(item.get('title', ''))
+                    resume_raw_text_parts.append(item.get('description', ''))
+            resume_raw_text_parts.extend(resume_data_for_scorer.get('skills', []))
+            
+            resume_data_for_scorer['raw_text'] = ' '.join(filter(None, resume_raw_text_parts))
+            
+        # 4. Initialize and Run Scorer
+        try:
+            # Import here to avoid circular imports
+            from api.scoring.ats_scorer import ATSScorer
+            scorer = ATSScorer()
+            result = scorer.score_resume(resume_data_for_scorer, job_data)
+            return Response(result, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error during scoring: {e}")
+            logger.exception("Scoring error details:")
+            return Response(
+                {"error": f"Error scoring resume: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in score_resume view: {e}")
+        logger.exception("Error details:")
+        return Response(
+            {"error": f"Unexpected error: {str(e)}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+

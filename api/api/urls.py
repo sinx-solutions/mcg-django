@@ -10,7 +10,8 @@ from .views import (
     CustomSectionItemViewSet,
     parse_resume,
     adapt_resume,
-    save_parsed_resume
+    save_parsed_resume,
+    score_resume
 )
 
 # Create a router and register our viewsets
@@ -29,4 +30,5 @@ urlpatterns = [
     path('parse-resume/', parse_resume, name='parse-resume'),
     path('adapt-resume/', adapt_resume, name='adapt-resume'),
     path('save-parsed-resume/', save_parsed_resume, name='save-parsed-resume'),
+    path('resumes/<uuid:resume_id>/score/', score_resume, name='score-resume'),
 ]
