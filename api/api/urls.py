@@ -11,7 +11,8 @@ from .views import (
     parse_resume,
     adapt_resume,
     save_parsed_resume,
-    score_resume
+    score_resume,
+    job_search_api
 )
 
 # Create a router and register our viewsets
@@ -31,4 +32,5 @@ urlpatterns = [
     path('adapt-resume/', adapt_resume, name='adapt-resume'),
     path('save-parsed-resume/', save_parsed_resume, name='save-parsed-resume'),
     path('resumes/<uuid:resume_id>/score/', score_resume, name='score-resume'),
+    path('job-search/', job_search_api, name='job_search_api'),
 ]

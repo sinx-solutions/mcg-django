@@ -1469,3 +1469,62 @@ def score_resume(request, resume_id):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
+
+# --- Imports for Job Search Agent API ---
+import sys
+import os
+import json
+import asyncio
+from django.http import JsonResponse, HttpResponseBadRequest
+
+# --- Job Search Agent API View ---
+
+# Ensure the agent-sdkk directory is findable
+AGENT_SDK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'agent-sdkk'))
+
+@api_view(['POST'])
+def job_search_api(request):
+    """API endpoint to interact with the JobSearchPal agent."""
+    try:
+        data = json.loads(request.body)
+        query = data.get('query')
+        if not query:
+            return HttpResponseBadRequest(json.dumps({"error": "Missing 'query' in request body."}))
+
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest(json.dumps({"error": "Invalid JSON in request body."}))
+    except Exception as e:
+        logger.error(f"Error reading request body: {e}")
+        return HttpResponseBadRequest(json.dumps({"error": f"Could not process request: {str(e)}"}))
+
+    # Temporarily add agent-sdkk path to sys.path to allow import
+    original_sys_path = list(sys.path)
+    if AGENT_SDK_DIR not in sys.path:
+        sys.path.insert(0, AGENT_SDK_DIR)
+
+    try:
+        # Import the agent and runner dynamically
+        # The load_dotenv() inside jobsearch should handle API keys if needed here
+        from jobsearch import job_search_agent, Runner
+
+        # Run the agent asynchronously
+        runner = Runner()
+        # Note: Runner.run might need specific parameters depending on its implementation
+        # Assuming it takes the agent and the query directly as the main input
+        result = asyncio.run(runner.run(job_search_agent, query))
+
+        # Extract the final output (adjust key if necessary based on Agent SDK)
+        final_output = result.get('final_output', "Agent did not produce final output.")
+
+        return JsonResponse({"result": final_output})
+
+    except ImportError as e:
+        logger.error(f"Could not import from jobsearch.py: {e}. Check path: {AGENT_SDK_DIR}")
+        return JsonResponse({"error": f"Server configuration error: Could not load job search module. {e}"}, status=500)
+    except Exception as e:
+        logger.error(f"Error running job search agent: {e}")
+        logger.exception("Job search agent error details:") # Log traceback
+        return JsonResponse({"error": f"Error processing job search: {str(e)}"}, status=500)
+    finally:
+        # Restore original sys.path
+        sys.path = original_sys_path
