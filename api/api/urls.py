@@ -17,13 +17,13 @@ from .views import (
 
 # Create a router and register our viewsets
 router = DefaultRouter()
-router.register(r'resumes', ResumeViewSet)
-router.register(r'work-experiences', WorkExperienceViewSet)
-router.register(r'educations', EducationViewSet)
-router.register(r'projects', ProjectViewSet)
-router.register(r'certifications', CertificationViewSet)
-router.register(r'custom-sections', CustomSectionViewSet)
-router.register(r'custom-section-items', CustomSectionItemViewSet)
+router.register(r'resumes', ResumeViewSet, basename='resume')
+router.register(r'work-experiences', WorkExperienceViewSet, basename='work-experience')
+router.register(r'educations', EducationViewSet, basename='education')
+router.register(r'projects', ProjectViewSet, basename='project')
+router.register(r'certifications', CertificationViewSet, basename='certification')
+router.register(r'custom-sections', CustomSectionViewSet, basename='custom-section')
+router.register(r'custom-section-items', CustomSectionItemViewSet, basename='custom-section-item')
 
 # Wire up our API using automatic URL routing
 urlpatterns = [
