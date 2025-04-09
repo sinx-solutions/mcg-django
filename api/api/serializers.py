@@ -125,8 +125,24 @@ class ResumeCompleteSerializer(serializers.ModelSerializer):
     educations = EducationNestedSerializer(many=True, required=False)
     projects = ProjectNestedSerializer(many=True, required=False)
     certifications = CertificationNestedSerializer(many=True, required=False)
-    # Use the nested writeable serializer for custom sections
     custom_sections = CustomSectionNestedSerializer(many=True, required=False)
+
+    # Explicitly define array fields to allow empty lists
+    section_order = serializers.ListField(
+        child=serializers.CharField(max_length=100, allow_blank=True),
+        required=False,
+        allow_empty=True
+    )
+    skills = serializers.ListField(
+        child=serializers.CharField(max_length=100, allow_blank=True),
+        required=False,
+        allow_empty=True
+    )
+    extra_sections = serializers.ListField(
+        child=serializers.CharField(max_length=100, allow_blank=True),
+        required=False,
+        allow_empty=True # Explicitly allow empty list []
+    )
 
     class Meta:
         model = Resume

@@ -46,12 +46,12 @@ BASE_URL = "http://localhost:8000/api"
 test_resume_data = {
     # Main resume data
     "user_id": SUPABASE_USER_ID,  # Should match the Supabase user ID in the token
-    "title": "Test Engineer Resume",
+    "title": "Sanchay Thalnerkar ULTRA FINAL TESTING FOR JWT DAMMIT",
     "description": "Created for testing API",
-    "first_name": "Test",
-    "last_name": "User",
-    "job_title": "Software Engineer",
-    "city": "San Francisco",
+    "first_name": "SANCHAY",
+    "last_name": "SANCHAY",
+    "job_title": "PROOMPT Engineer",
+    "city": "Mumbai",
     "country": "USA",
     "phone": "555-123-4567",
     "email": "test@example.com",
