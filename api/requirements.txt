@@ -99,6 +99,7 @@ django-simple-captcha
 django-storages
 django_csp
 djangorestframework
+drf-spectacular
 docopt
 duckduckgo_search
 dulwich
@@ -418,3 +419,4 @@ yarl
 zipp
 zope.event
 zope.interface
+drf_spectacular

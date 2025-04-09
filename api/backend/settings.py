@@ -34,7 +34,8 @@ if not SUPABASE_JWT_SECRET:
 SECRET_KEY = os.getenv('SECRET_KEY', "django-insecure-ikfbztg&cxbh8qn-)13om7gqp2oygeqh-r50wcxdpiozp!#n!%")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+# DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+DEBUG = True # Temporarily set to True to see traceback
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'mcg-be.sinxsolutions.ai']
 
@@ -51,8 +52,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "api",
-    
-    
+    "drf_spectacular",
 ]
 
 MIDDLEWARE = [
@@ -163,3 +163,23 @@ CORS_ALLOWED_ORIGINS = [
     'http://mcg-be.sinxsolutions.ai',
 ]
 CORS_ALLOW_ALL_ORIGINS = False
+
+# Django REST Framework settings
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'authentication.SupabaseAuthentication', # Still attempts auth if token provided
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.AllowAny', # Allows requests even if not authenticated
+    ],
+}
+
+# drf-spectacular settings
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'MCG API',
+    'DESCRIPTION': 'API for the My Career Gateway project',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # OTHER SETTINGS
+}

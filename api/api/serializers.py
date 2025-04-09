@@ -216,3 +216,12 @@ class ResumeCompleteSerializer(serializers.ModelSerializer):
             self._update_nested_items(instance, custom_sections_data, CustomSection, 'custom_sections')
 
         return instance
+
+
+# Serializer for job_search_api input
+class JobSearchQuerySerializer(serializers.Serializer):
+    query = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        help_text="The search query string for jobs."
+    )

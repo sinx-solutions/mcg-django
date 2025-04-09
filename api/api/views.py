@@ -5,7 +5,7 @@ from rest_framework.decorators import api_view, action, parser_classes, permissi
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from .schemas import ParsedResumeSchema
-from django.http import Http404
+from django.http import Http404, HttpResponseBadRequest, JsonResponse
 import os
 import json
 import re
@@ -21,9 +21,14 @@ from pydantic import ValidationError # Keep for potential validation if needed, 
 from datetime import datetime
 import logging # Import logging
 import sys
+import asyncio # Ensure asyncio is imported
 from rest_framework.authentication import BaseAuthentication
 # Import the correct authentication class
 from authentication import SupabaseAuthentication
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRequest, OpenApiResponse
+from drf_spectacular.types import OpenApiTypes
+# Import the new serializer
+from .serializers import JobSearchQuerySerializer
 
 # Configure logging for views
 logger = logging.getLogger('resume_api')
@@ -567,6 +572,16 @@ class WorkExperienceViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Invalid resume ID format.")
 
+    @extend_schema(
+        request=None, # Explicitly set request body to None
+        responses={
+            200: OpenApiResponse(description="Enhanced description generated."),
+            404: OpenApiResponse(description="Work experience not found or access denied."),
+            500: OpenApiResponse(description="Server error during enhancement.")
+        },
+        summary="Enhance work experience description using AI.",
+        description="Takes a work experience ID from the URL path and uses AI to generate an improved description. No request body is needed."
+    )
     @action(detail=True, methods=['post'])
     def enhance(self, request, pk=None):
         """
@@ -1759,21 +1774,29 @@ from django.http import JsonResponse, HttpResponseBadRequest
 # Ensure the agent-sdkk directory is findable
 AGENT_SDK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'agent-sdkk'))
 
+@extend_schema(
+    # Replace the manual request definition with the serializer
+    request=JobSearchQuerySerializer,
+    responses={
+        200: OpenApiResponse(description="Job search results."),
+        400: OpenApiResponse(description="Invalid JSON or missing/invalid query parameter."),
+        500: OpenApiResponse(description="Server error during job search.")
+    },
+    summary="Perform a job search using the JobSearchPal agent.",
+    description="Takes a JSON POST body with a 'query' field and returns job search results from the agent."
+)
 @api_view(['POST'])
 def job_search_api(request):
     """API endpoint to interact with the JobSearchPal agent."""
-    try:
-        data = json.loads(request.body)
-        query = data.get('query')
-        if not query:
-            return HttpResponseBadRequest(json.dumps({"error": "Missing 'query' in request body."}))
+    # Use the serializer to validate and parse input
+    serializer = JobSearchQuerySerializer(data=request.data)
+    if serializer.is_valid():
+        query = serializer.validated_data['query']
+    else:
+        # Return serializer errors for invalid input
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    except json.JSONDecodeError:
-        return HttpResponseBadRequest(json.dumps({"error": "Invalid JSON in request body."}))
-    except Exception as e:
-        logger.error(f"Error reading request body: {e}")
-        return HttpResponseBadRequest(json.dumps({"error": f"Could not process request: {str(e)}"}))
-
+    # The rest of your logic remains largely the same, but uses the validated 'query'
     # Temporarily add agent-sdkk path to sys.path to allow import
     original_sys_path = list(sys.path)
     if AGENT_SDK_DIR not in sys.path:
@@ -1781,16 +1804,13 @@ def job_search_api(request):
 
     try:
         # Import the agent and runner dynamically
-        # The load_dotenv() inside jobsearch should handle API keys if needed here
         from jobsearch import job_search_agent, Runner
 
         # Run the agent asynchronously
         runner = Runner()
-        # Note: Runner.run might need specific parameters depending on its implementation
-        # Assuming it takes the agent and the query directly as the main input
         result = asyncio.run(runner.run(job_search_agent, query))
 
-        # Extract the final output (adjust key if necessary based on Agent SDK)
+        # Extract the final output
         final_output = result.get('final_output', "Agent did not produce final output.")
 
         return JsonResponse({"result": final_output})
@@ -1800,7 +1820,7 @@ def job_search_api(request):
         return JsonResponse({"error": f"Server configuration error: Could not load job search module. {e}"}, status=500)
     except Exception as e:
         logger.error(f"Error running job search agent: {e}")
-        logger.exception("Job search agent error details:") # Log traceback
+        logger.exception("Job search agent error details:")
         return JsonResponse({"error": f"Error processing job search: {str(e)}"}, status=500)
     finally:
         # Restore original sys.path
