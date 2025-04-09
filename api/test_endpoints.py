@@ -6,7 +6,8 @@ from datetime import datetime
 import time
 
 # API base URL
-BASE_URL = "http://10.0.0.106:8000/api"
+
+BASE_URL = "http://mcg-be.sinxsolutions.ai/api"
 
 # Colors for terminal output
 class Colors:
