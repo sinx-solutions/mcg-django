@@ -4,9 +4,20 @@ Simple script to test only the Supabase authentication mechanism.
 """
 import requests
 import json
+import os               # Import os
+from dotenv import load_dotenv # Import load_dotenv
 
-# Use the token we generated earlier
-SUPABASE_TEST_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiaWF0IjoxNzQ0MjAyOTU1LCJleHAiOjE3NDQyODkzNTUsInN1YiI6IjI1NTJjMjI5LTQ5ZjctNDlhYS1iMTlkLWQ5NjdiYzJiM2I3OCIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIn0sInVzZXJfbWV0YWRhdGEiOnsibmFtZSI6IlRlc3QgVXNlciJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCJ9.tb_FAtx5CtLZQAo1GW8eRQxPVcWEqkH-G2D5QWakNJU"
+# Load environment variables from .env file in the api/ directory
+dotenv_path = os.path.join(os.path.dirname(__file__), 'api', '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
+# Use the token stored in the environment variable
+SUPABASE_TEST_TOKEN = os.getenv('SAMPLE_JWT')
+
+if not SUPABASE_TEST_TOKEN:
+    print("ERROR: SAMPLE_JWT environment variable not found.")
+    print("Please ensure SAMPLE_JWT is set in your .env file.")
+    exit(1)
 
 # Base URL for the API
 BASE_URL = "http://localhost:8000/api"

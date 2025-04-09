@@ -203,26 +203,27 @@ class ResumeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         print(f"DEBUG: User: {user}, Is authenticated: {getattr(user, 'is_authenticated', False)}")
         logger.debug(f"perform_create called with user: {user}")
-        
+
         if not user.is_authenticated:
-            print("DEBUG: User not authenticated, raising PermissionDenied")
+            print("DEBUG: User not authenticated, raising PermissionDenied") # Keep this specific debug print for now
             logger.warning("Unauthenticated user attempted to create resume")
             from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Authentication required to create a resume.")
-            
-        # Check if user_id is provided in request data and if it matches authenticated user
-        user_id_in_data = serializer.validated_data.get('user_id')
-        print(f"DEBUG: user_id in data: {user_id_in_data}")
-        print(f"DEBUG: authenticated user.id: {user.id}")
-        
-        if user_id_in_data and str(user_id_in_data) != str(user.id):
-            print("DEBUG: user_id mismatch, raising PermissionDenied")
-            logger.warning(f"User ID mismatch: {user_id_in_data} vs {user.id}")
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Cannot create resume for another user.")
+
+        # The user_id from the validated data is not needed and could potentially allow
+        # a user to create a resume for someone else if validation was misconfigured.
+        # Always rely on the authenticated user from the token.
+        # user_id_in_data = serializer.validated_data.get('user_id')
+        # print(f"DEBUG: user_id in data: {user_id_in_data}")
+        # print(f"DEBUG: authenticated user.id: {user.id}")
+        # if user_id_in_data and str(user_id_in_data) != str(user.id):
+        #     print("DEBUG: user_id mismatch, raising PermissionDenied")
+        #     logger.warning(f"User ID mismatch: {user_id_in_data} vs {user.id}")
+        #     from rest_framework.exceptions import PermissionDenied
+        #     raise PermissionDenied("Cannot create resume for another user.")
 
         # Save with the authenticated user's ID
-        print(f"DEBUG: Saving resume with user_id: {user.id}")
+        print(f"DEBUG: Saving resume with user_id: {user.id}") # Keep this specific debug print for now
         logger.info(f"Creating resume for user_id: {user.id}")
         serializer.save(user_id=user.id)
 

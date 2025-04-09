@@ -7,14 +7,37 @@ import requests
 import json
 import uuid
 from pprint import pprint
+import os  # Import os
+from dotenv import load_dotenv  # Import load_dotenv
 
-# First run generate_test_token.py to create a test token
-# Then set the token here:
-SUPABASE_TEST_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOiJhdXRoZW50aWNhdGVkIiwiaWF0IjoxNzQ0MjAyOTU1LCJleHAiOjE3NDQyODkzNTUsInN1YiI6IjI1NTJjMjI5LTQ5ZjctNDlhYS1iMTlkLWQ5NjdiYzJiM2I3OCIsImVtYWlsIjoidGVzdEBleGFtcGxlLmNvbSIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIn0sInVzZXJfbWV0YWRhdGEiOnsibmFtZSI6IlRlc3QgVXNlciJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCJ9.tb_FAtx5CtLZQAo1GW8eRQxPVcWEqkH-G2D5QWakNJU"
+# Load environment variables from .env file in the api/ directory
+dotenv_path = os.path.join(os.path.dirname(__file__), 'api', '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
+# Use the token stored in the environment variable
+SUPABASE_TEST_TOKEN = os.getenv('SAMPLE_JWT')
+
+if not SUPABASE_TEST_TOKEN:
+    print("ERROR: SAMPLE_JWT environment variable not found.")
+    print(f"Please ensure SAMPLE_JWT is set in your .env file (looked in: {dotenv_path})")
+    exit(1)
 
 # Set the Supabase user ID to match the one in the token
 # This should match the 'sub' claim in your token
-SUPABASE_USER_ID = "2552c229-49f7-49aa-b19d-d967bc2b3b78"
+# Extract user ID from token instead of hardcoding (optional but good practice)
+SUPABASE_USER_ID_FROM_TOKEN = None
+try:
+    import jwt
+    # Decode without verification just to get the sub claim for the test data
+    decoded = jwt.decode(SUPABASE_TEST_TOKEN, options={"verify_signature": False})
+    SUPABASE_USER_ID_FROM_TOKEN = decoded.get('sub')
+except Exception as e:
+    print(f"Warning: Could not decode SAMPLE_JWT to extract user ID: {e}")
+
+# If decoding failed or no sub, fallback or raise error if needed
+SUPABASE_USER_ID = SUPABASE_USER_ID_FROM_TOKEN or "fallback_user_id_if_needed"
+if not SUPABASE_USER_ID_FROM_TOKEN:
+     print(f"Warning: Using fallback user ID: {SUPABASE_USER_ID}")
 
 # Base URL of the API
 BASE_URL = "http://localhost:8000/api"
@@ -216,13 +239,13 @@ def main():
     updated_resume = test_update_resume(resume_id)
     if not updated_resume:
         print("Failed to update resume.")
-    
-    # Cleanup - delete the test resume
-    if resume_id:
-        if cleanup(resume_id):
-            print("Test resume deleted successfully.")
-        else:
-            print("Failed to delete test resume.")
+
+    # Cleanup - delete the test resume (Commented out for manual inspection)
+    # if resume_id:
+    #     if cleanup(resume_id):
+    #         print("Test resume deleted successfully.")
+    #     else:
+    #         print("Failed to delete test resume.")
 
 if __name__ == "__main__":
     main()

@@ -12,7 +12,8 @@ logger.setLevel(logging.DEBUG)
 
 # Create console handler
 handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
+# Set handler level to INFO for production, change to DEBUG if needed
+handler.setLevel(logging.INFO)
 
 # Create formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,7 +30,6 @@ class SupabaseUser:
     def __init__(self, user_id):
         self.id = user_id
         self.is_authenticated = True
-        print(f"DEBUG: Created SupabaseUser with ID: {user_id}")
 
     @property
     def is_anonymous(self):
@@ -39,71 +39,73 @@ class SupabaseUser:
 class SupabaseAuthentication(BaseAuthentication):
     """
     Authentication backend for Supabase JWT tokens.
-    Extracts the JWT from the Authorization header and validates it.
+    Extracts the JWT from the Authorization header and validates it securely.
     """
     def authenticate(self, request):
-        print(f"\n\n==== AUTHENTICATION ATTEMPT ====")
-        print(f"Request path: {request.path}")
-        print(f"Request method: {request.method}")
-        print(f"Request headers: {dict(request.headers)}")
-        logger.debug(f"Authentication attempt for {request.path}")
-        
-        # Get the token from the Authorization header
         auth_header = request.META.get('HTTP_AUTHORIZATION', '')
-        print(f"Authorization header: {auth_header[:20]}...")
         logger.debug(f"Auth header present: {bool(auth_header)}")
-        
+
         if not auth_header or not auth_header.startswith('Bearer '):
-            print("DEBUG: No Bearer token found in Authorization header")
-            logger.warning("No Bearer token found")
+            logger.warning("No Bearer token found or invalid header format")
             return None  # No credentials provided
-            
+
         token = auth_header.replace('Bearer ', '', 1)
-        print(f"DEBUG: Token extracted: {token[:20]}...")
         logger.debug("Token extracted from header")
-        
+
+        # Check if the secret key is loaded
+        jwt_secret = getattr(settings, 'SUPABASE_JWT_SECRET', None)
+        if not jwt_secret:
+            logger.error("SUPABASE_JWT_SECRET is not configured in settings.")
+            # Raise AuthenticationFailed to signal a server config issue
+            raise AuthenticationFailed("Server authentication configuration error.")
+
         try:
-            # For now, just decode the token without verification (for testing)
-            # In production, you should verify this with the proper public key
-            # jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"])
-            
-            print("DEBUG: Attempting to decode token...")
-            # Simple decode without verification (for testing only!)
-            decoded_token = jwt.decode(token, options={"verify_signature": False})
-            
-            print(f"DEBUG: Token decoded successfully: {decoded_token}")
-            logger.debug(f"Token decoded: {decoded_token}")
-            
+            logger.debug("Attempting secure JWT decoding...")
+            decoded_token = jwt.decode(
+                token,
+                jwt_secret,
+                algorithms=["HS256"], # Specify the expected algorithm
+                # Explicitly specify the expected audience
+                audience="authenticated",
+                options={"verify_signature": True, "verify_exp": True} # Explicitly enable verification
+            )
+            logger.debug(f"Token decoded successfully. Payload keys: {decoded_token.keys()}")
+
             # Extract the user ID - in Supabase it's in the 'sub' claim
             user_id = decoded_token.get('sub')
-            print(f"DEBUG: User ID from token: {user_id}")
-            
+
             if not user_id:
-                print("DEBUG: No user ID found in token")
-                logger.warning("No user ID (sub) found in token")
-                return None
-                
+                logger.warning("No user ID (sub) found in token claims.")
+                raise AuthenticationFailed("Invalid token: Missing user identifier.")
+
             # Create a user object with the ID
             user = SupabaseUser(user_id)
-            print(f"DEBUG: Created user object with ID: {user.id}")
-            logger.debug(f"Authentication successful for user ID: {user_id}")
-            
+            logger.info(f"Authentication successful for user ID: {user_id}")
+
             # Return (user, token) tuple as expected by DRF
-            print("DEBUG: Returning authenticated user")
             return (user, token)
-            
+
+        except jwt.ExpiredSignatureError:
+            logger.warning("Token signature has expired.")
+            raise AuthenticationFailed("Token has expired.")
+        except jwt.InvalidSignatureError:
+            logger.warning("Token signature verification failed.")
+            raise AuthenticationFailed("Invalid token signature.")
+        except jwt.InvalidAudienceError:
+            logger.warning("Invalid token audience.")
+            raise AuthenticationFailed("Invalid token audience.")
+        except jwt.DecodeError as e:
+            logger.warning(f"Token decode error: {str(e)}")
+            raise AuthenticationFailed(f"Invalid token: {str(e)}")
         except jwt.PyJWTError as e:
-            # Log the error for debugging
-            print(f"DEBUG: JWT Error: {str(e)}")
-            print(f"DEBUG: Token that failed: {token[:30]}...")
-            logger.error(f"JWT error: {str(e)}")
-            return None
+            # Catch other JWT errors
+            logger.error(f"Unhandled JWT error: {str(e)}")
+            raise AuthenticationFailed(f"Token processing error: {str(e)}")
         except Exception as e:
-            # Catch any other exceptions for debugging
-            print(f"DEBUG: Unexpected error in authentication: {str(e)}")
-            logger.error(f"Unexpected error: {str(e)}")
-            return None
-        
+            # Catch any other unexpected exceptions during authentication
+            logger.error(f"Unexpected error in authentication: {str(e)}", exc_info=True)
+            raise AuthenticationFailed("An unexpected error occurred during authentication.")
+
     def authenticate_header(self, request):
         """
         Return a string to be used as the value of the WWW-Authenticate
