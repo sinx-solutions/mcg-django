@@ -3,6 +3,23 @@ import uuid
 from django.utils import timezone
 from django.contrib.postgres.fields import ArrayField
 
+# --- User Profile Model (Unmanaged - for potential read-only access) ---
+# Only needed if Django needs to READ data directly from the original 'profiles' table.
+# Django will NOT create or manage migrations for this table.
+class Profile(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False) # Matches Supabase auth.users.id / public.profiles.id
+    # Map Django fields to actual DB columns based on Prisma schema
+    full_name = models.CharField(max_length=255, blank=True, null=True, db_column='full_name') # Prisma 'full_name'
+    email = models.EmailField(unique=True, blank=True, null=True, db_column='email') # Prisma 'email'
+    avatar_url = models.URLField(blank=True, null=True, db_column='avatar_url') # Prisma 'avatar_url'
+
+    class Meta:
+        managed = False # <= Tells Django NOT to create/alter/delete this table
+        db_table = 'profiles' # <= MUST match the exact table name in Supabase DB
+
+    def __str__(self):
+        return self.email or str(self.id)
+
 # Create your models here.
 class Resume(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_column='id')
@@ -142,3 +159,28 @@ class CustomSectionItem(models.Model):
         managed = False
         db_table = "custom_section_items"
         ordering = ['-start_date', '-end_date']
+
+
+# --- Saved Cover Letter Model (Unmanaged - Reads/Writes to EXISTING table) ---
+
+class SavedCoverLetter(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, db_column='id')
+    # User relationship (Stores Supabase auth.users.id)
+    user_id = models.UUIDField(editable=False, db_index=True, db_column='userId') # Prisma 'userId'
+
+    # Cover Letter Content and Context
+    cover_letter = models.TextField(db_column='coverLetter') # Prisma 'coverLetter' @db.Text
+    job_title = models.CharField(max_length=255, blank=True, null=True, db_column='jobTitle') # Prisma 'jobTitle'?
+    company_name = models.CharField(max_length=255, blank=True, null=True, db_column='companyName') # Prisma 'companyName'?
+
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now, db_column='createdAt') # Prisma 'createdAt'
+    updated_at = models.DateTimeField(auto_now=True, db_column='updatedAt') # Prisma 'updatedAt'
+
+    class Meta:
+        managed = False
+        db_table = "saved_cover_letters" # Prisma @@map("saved_cover_letters")
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Cover Letter for {self.company_name or '?'} ({self.user_id}) - {self.created_at.strftime('%Y-%m-%d')}"

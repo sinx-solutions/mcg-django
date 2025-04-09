@@ -6,7 +6,8 @@ from .models import (
     Project,
     Certification,
     CustomSection,
-    CustomSectionItem
+    CustomSectionItem,
+    SavedCoverLetter
 )
 import uuid # Added import for UUID validation if needed later
 
@@ -241,3 +242,46 @@ class JobSearchQuerySerializer(serializers.Serializer):
         allow_blank=False,
         help_text="The search query string for jobs."
     )
+
+# --- Serializers for Cover Letter Generation ---
+
+class GenerateCoverLetterInputSerializer(serializers.Serializer):
+    resume_id = serializers.UUIDField(
+        required=True,
+        help_text="The UUID of the resume to base the cover letter on."
+    )
+    job_title = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        max_length=255,
+        help_text="The title of the job being applied for."
+    )
+    company_name = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        max_length=255,
+        help_text="The name of the company."
+    )
+    job_description = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        help_text="The full text of the job description."
+    )
+
+class GeneratedCoverLetterSerializer(serializers.Serializer):
+    saved_cover_letter_id = serializers.UUIDField(
+        read_only=True,
+        help_text="The UUID of the saved cover letter record."
+    )
+    cover_letter_text = serializers.CharField(
+        read_only=True,
+        help_text="The generated cover letter text."
+    )
+
+# --- Serializer for SavedCoverLetter CRUD ---
+
+class SavedCoverLetterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SavedCoverLetter
+        fields = '__all__' # Include all fields: id, user_id, cover_letter, job_title, company_name, created_at, updated_at
+        read_only_fields = ('id', 'user_id', 'created_at', 'updated_at') # User ID is set automatically

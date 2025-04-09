@@ -12,7 +12,9 @@ from .views import (
     adapt_resume,
     save_parsed_resume,
     score_resume,
-    job_search_api
+    job_search_api,
+    generate_cover_letter,
+    SavedCoverLetterViewSet
 )
 
 # Create a router and register our viewsets
@@ -24,6 +26,7 @@ router.register(r'projects', ProjectViewSet, basename='project')
 router.register(r'certifications', CertificationViewSet, basename='certification')
 router.register(r'custom-sections', CustomSectionViewSet, basename='custom-section')
 router.register(r'custom-section-items', CustomSectionItemViewSet, basename='custom-section-item')
+router.register(r'saved-cover-letters', SavedCoverLetterViewSet, basename='saved-cover-letter')
 
 # Wire up our API using automatic URL routing
 urlpatterns = [
@@ -33,4 +36,5 @@ urlpatterns = [
     path('save-parsed-resume/', save_parsed_resume, name='save-parsed-resume'),
     path('resumes/<uuid:resume_id>/score/', score_resume, name='score-resume'),
     path('job-search/', job_search_api, name='job_search_api'),
+    path('generate-cover-letter/', generate_cover_letter, name='generate-cover-letter'),
 ]

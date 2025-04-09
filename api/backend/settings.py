@@ -64,6 +64,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # Remove custom logging middleware reference
+    # "api.middleware.RequestResponseLoggingMiddleware",
 ]
 
 ROOT_URLCONF = "backend.urls"
@@ -168,9 +170,9 @@ CORS_ALLOW_ALL_ORIGINS = False
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        # Add SessionAuthentication first for browser/admin access
-        'rest_framework.authentication.SessionAuthentication',
-        'authentication.SupabaseAuthentication', # Then check for Supabase JWT
+        # Remove SessionAuthentication from defaults to avoid CSRF conflicts with JWT auth
+        # 'rest_framework.authentication.SessionAuthentication',
+        'authentication.SupabaseAuthentication', # Rely solely on Supabase JWT by default
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny', # Allows requests even if not authenticated

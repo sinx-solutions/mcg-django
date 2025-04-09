@@ -18,17 +18,19 @@ import docx
 import google.generativeai as genai
 import requests # Added for OpenRouter
 from pydantic import ValidationError # Keep for potential validation if needed, though OpenRouter handles it
-from datetime import datetime
+from datetime import datetime, date
 import logging # Import logging
 import sys
 import asyncio # Ensure asyncio is imported
+from django.views.decorators.csrf import csrf_exempt # Import csrf_exempt
 from rest_framework.authentication import BaseAuthentication
 # Import the correct authentication class
 from authentication import SupabaseAuthentication
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRequest, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 # Import the new serializer
-from .serializers import JobSearchQuerySerializer
+from .serializers import JobSearchQuerySerializer, GenerateCoverLetterInputSerializer, GeneratedCoverLetterSerializer, SavedCoverLetterSerializer
+from django.utils.decorators import method_decorator # Import for decorating class methods/class
 
 # Configure logging for views
 logger = logging.getLogger('resume_api')
@@ -42,6 +44,7 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
+from .models import Profile # Explicitly import Profile first
 from .models import (
     Resume,
     WorkExperience,
@@ -49,7 +52,9 @@ from .models import (
     Project,
     Certification,
     CustomSection,
-    CustomSectionItem
+    CustomSectionItem,
+    # Profile, # Already imported above
+    SavedCoverLetter
 )
 from .serializers import (
     ResumeSerializer,
@@ -910,9 +915,10 @@ class CustomSectionItemViewSet(viewsets.ModelViewSet):
             )
 
 # Resume Parser API View using OpenRouter
-@api_view(['POST'])
+@api_view(['POST']) # Keep @api_view first
+@csrf_exempt        # Add csrf_exempt
 @parser_classes([MultiPartParser, FormParser])
-@permission_classes([IsAuthenticated]) # Add permission check
+@permission_classes([IsAuthenticated])
 def parse_resume(request):
     """
     Parse a resume file (PDF/Word) and extract structured data using OpenRouter.
@@ -921,10 +927,8 @@ def parse_resume(request):
 
     # 1. Get file and validate user_id from the request
     resume_files = request.FILES.get('resume')
-    user_id = request.data.get('user_id')
 
     print(f"Received File: {resume_files.name if resume_files else 'None'}")
-    print(f'Received user_id : {user_id}')
 
     # 2. Validate input
     if not resume_files:
@@ -932,28 +936,14 @@ def parse_resume(request):
             {'error': "No resume files were uploaded"}, status=status.HTTP_400_BAD_REQUEST
         )
 
-    if not user_id:
-        return Response(
-            {'error': "No user id provided in the request"}, status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # 3. Validate user_id UUID format
-    try:
-        user_id_uuid = uuid.UUID(user_id)
-        print(f"Validated user_id as UUID: {user_id_uuid}")
-    except ValueError:
-        return Response(
-            {"error": "Invalid user_id format. Please provide a valid UUID format."}, status=status.HTTP_400_BAD_REQUEST
-        )
-
-    # 4. Validate file type
+    # 3. Validate file type
     file_name = resume_files.name.lower()
     if not (file_name.endswith('.pdf') or file_name.endswith('.docx')):
         return Response(
             {"error": f"Unsupported file format: {file_name}. Please upload a PDF or DOCX file."}, status=status.HTTP_400_BAD_REQUEST
         )
 
-    # 5. Extract text from file
+    # 4. Extract text from file
     raw_text = ""
     try:
         print(f"Attempting to extract text from: {resume_files.name}")
@@ -1003,7 +993,7 @@ def parse_resume(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    # 6. Process raw text with OpenRouter
+    # 5. Process raw text with OpenRouter
     try:
         print("Attempting to parse resume content with OpenRouter")
         
@@ -1555,10 +1545,13 @@ def adapt_resume(request):
 
 # Add this function after your parse_resume function
 
-@api_view(['POST'])
+@api_view(['POST']) # Keep @api_view first
+@csrf_exempt        # Add csrf_exempt
+@permission_classes([IsAuthenticated])
 def save_parsed_resume(request):
     """
-    Save a parsed resume from the validated data to the database
+    Save a parsed resume from the validated data to the database.
+    Uses the authenticated user from the JWT.
     """
     try:
         # Get validated data from request
@@ -1568,24 +1561,17 @@ def save_parsed_resume(request):
                 {"error": "No validated resume data provided"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-            
-        # Get user ID
-        user_id = request.data.get('user_id')
-        if not user_id:
-            return Response(
-                {"error": "No user ID provided"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # Validate user_id as UUID
-        try:
-            user_id_uuid = uuid.UUID(user_id)
-        except ValueError:
-            return Response(
-                {"error": "Invalid user_id format. Please provide a valid UUID format."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
+
+        # --- GET USER ID FROM AUTHENTICATED TOKEN --- <<< MODIFY THIS SECTION
+        if not request.user.is_authenticated:
+             # This check might be redundant due to @permission_classes, but safe to keep
+             return Response(
+                 {"error": "Authentication required."}, 
+                 status=status.HTTP_401_UNAUTHORIZED
+             )
+        user_id_uuid = request.user.id # Get user ID from the verified token
+        # --------------------------------------------
+
         # Extract personal info
         personal_info = validated_data.get('personal_info', {})
         
@@ -1825,3 +1811,257 @@ def job_search_api(request):
     finally:
         # Restore original sys.path
         sys.path = original_sys_path
+
+# --- Generate Cover Letter View ---
+
+# Helper to serialize UUIDs for JSON dumping in prompt
+def serialize_uuid(obj):
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+@extend_schema(
+    request=GenerateCoverLetterInputSerializer,
+    responses={
+        200: OpenApiResponse(response=GeneratedCoverLetterSerializer, description="Cover letter generated and saved successfully."),
+        400: OpenApiResponse(description="Invalid input data."),
+        401: OpenApiResponse(description="Authentication required."),
+        403: OpenApiResponse(description="Permission denied (e.g., resume not found or doesn't belong to user)."),
+        404: OpenApiResponse(description="Resume or Profile not found."),
+        500: OpenApiResponse(description="Server error during generation or saving."),
+        503: OpenApiResponse(description="AI Service (OpenRouter) unavailable or returned an error.")
+    },
+    summary="Generate a tailored cover letter using AI.",
+    description="Takes a resume ID and job details, generates a cover letter using AI based on mapping resume content to the job description, saves it, and returns the result."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([IsAuthenticated])
+def generate_cover_letter(request):
+    """API endpoint to generate a cover letter based on a resume and job description."""
+    logger.info("generate_cover_letter endpoint called.")
+
+    # 1. Validate Input
+    input_serializer = GenerateCoverLetterInputSerializer(data=request.data)
+    if not input_serializer.is_valid():
+        logger.error(f"Invalid input data: {input_serializer.errors}")
+        return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    validated_data = input_serializer.validated_data
+    resume_id = validated_data['resume_id']
+    job_title = validated_data['job_title']
+    company_name = validated_data['company_name']
+    job_description = validated_data['job_description']
+    user_id = request.user.id # Get authenticated user ID
+
+    logger.debug(f"Input validated for user {user_id}, resume {resume_id}")
+
+    # 2. Fetch Resume Data
+    try:
+        resume = Resume.objects.get(pk=resume_id, user_id=user_id)
+        resume_serializer = ResumeDetailSerializer(resume)
+        resume_data_json = json.dumps(resume_serializer.data, indent=2, default=serialize_uuid)
+        logger.debug("Resume data fetched and serialized.")
+    except Resume.DoesNotExist:
+        logger.warning(f"Resume not found or access denied for user {user_id}, resume {resume_id}")
+        return Response({"error": "Resume not found or you do not have permission to access it."}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error fetching resume {resume_id} for user {user_id}: {e}")
+        return Response({"error": "Failed to retrieve resume data."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # 3. Fetch Profile Data & Generate Date
+    user_profile = {}
+    try:
+        profile = Profile.objects.get(pk=user_id)
+        user_profile = {
+            "name": profile.full_name or None, # Use None if empty
+            "email": profile.email or None,
+            # Add address fields here IF they existed in the Profile model
+            # "address": profile.address_line1 or None,
+            # "city": profile.city or None,
+            # etc.
+        }
+        logger.debug("Profile data fetched.")
+    except Profile.DoesNotExist:
+        logger.warning(f"Profile not found for user {user_id}. Placeholders will be used.")
+        pass # Continue with empty user_profile dict
+    except Exception as e:
+        logger.error(f"Error fetching profile for user {user_id}: {e}")
+        pass # Non-fatal, continue with empty user_profile dict
+
+    # Generate current date
+    current_date_str = date.today().strftime("%B %d, %Y") # e.g., April 10, 2025
+
+    # Prepare placeholders, using fetched data or generic placeholders if None/missing
+    # Important: Decide on consistent placeholders if data is missing
+    placeholder_name = user_profile.get('name') or "[Your Name]"
+    placeholder_email = user_profile.get('email') or "[Your Email]"
+    placeholder_phone = resume.phone or "[Your Phone Number]" # Get phone from Resume model
+    # Address details are missing from Profile model based on schema
+    placeholder_address = "[Your Address]"
+    placeholder_city_state_zip = f"{resume.city or '[City]'}, {resume.country or '[Country]'}" # Combine from Resume
+
+    # 4. Construct AI Prompt (Refined)
+    prompt = f"""
+You are an expert career advisor and professional writer crafting a persuasive cover letter.
+Your task is to generate a tailored cover letter based on the provided resume data and job details.
+
+**Instructions:**
+1.  Analyze the **Job Description** for key requirements, skills, keywords, and company values.
+2.  Review the structured **Resume Data**.
+3.  **Crucially**, generate the cover letter body by **directly mapping specific examples, achievements, projects, and skills** from the Resume Data to the **key requirements** identified in the Job Description. Demonstrate skills using evidence; quantify achievements if possible.
+4.  Structure the letter with:
+    *   **Header:** Include sender contact details (Name, Address, City/State/Zip, Email, Phone) and the current Date ({current_date_str}). **Only include address lines if address data is available in the User Profile Data section below; otherwise, omit the address lines.** Use the provided contact details. Use placeholder brackets (e.g., `[Hiring Manager Name]`, `[Company Address]`) for recipient details if not known.
+    *   **Introduction:** State the position ({job_title}), company ({company_name}), and express specific enthusiasm.
+    *   **Body Paragraph(s) (1-3):** Focus each paragraph on 1-2 key job requirements and showcase how specific resume experiences/skills/projects directly meet them. Use strong action verbs.
+    *   **Company Fit Paragraph:** Explain interest in *this specific company* ({company_name}). Connect the user's background to the company's mission/culture if possible.
+    *   **Closing:** Reiterate enthusiasm, express confidence, call to action (e.g., discuss further).
+    *   **Signature:** Use the user's name.
+5.  Maintain a professional, confident, enthusiastic, and tailored tone. Avoid generic clichés.
+6.  Format as a standard professional letter.
+7.  Return ONLY the full text of the cover letter as a single string, with appropriate line breaks (\\n).
+
+**Job Details:**
+*   Job Title: {job_title}
+*   Company Name: {company_name}
+*   Job Description:
+{job_description}
+
+**Resume Data (JSON):**
+{resume_data_json}
+
+**User Profile Data (for placeholders):**
+*   Name: {placeholder_name}
+*   Email: {placeholder_email}
+*   Phone: {placeholder_phone}
+*   Address: {placeholder_address} 
+*   City/State/Zip: {placeholder_city_state_zip}
+*   Date: {current_date_str}
+
+Now, generate the cover letter text:
+"""
+
+    logger.debug(f"Prompt constructed (length: {len(prompt)} chars). First 500 chars: {prompt[:500]}")
+
+    # 5. Call OpenRouter API
+    try:
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_api_key:
+            logger.error("OpenRouter API key not found in environment variables.")
+            return Response({"error": "AI service configuration error."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        logger.info(f"Calling OpenRouter API (model: openai/gpt-4o) for user {user_id}")
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {openrouter_api_key}",
+                "Content-Type": "application/json",
+                # Optional: Add Helicone headers if needed
+                # "Helicone-Auth": f"Bearer {os.getenv('HELICONE_API_KEY')}"
+            },
+            json={
+                # Consider using a slightly cheaper/faster model if acceptable, e.g., claude-3-haiku, mistral models
+                # Or stick with a powerful one like gpt-4o or claude-3-sonnet/opus
+                "model": "openai/gpt-4o", # Or "anthropic/claude-3-sonnet-20240229", "google/gemini-pro-1.5"
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 1500, # Adjust as needed
+                "temperature": 0.7, # Adjust for creativity vs. predictability
+            },
+            timeout=90 # Increase timeout for potentially long generation
+        )
+
+        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+
+        ai_data = response.json()
+        generated_text = ai_data.get('choices', [{}])[0].get('message', {}).get('content', '').strip()
+
+        if not generated_text:
+            logger.error(f"OpenRouter response missing content for user {user_id}. Response: {ai_data}")
+            return Response({"error": "AI service returned empty content."}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+        logger.info(f"Successfully received generated cover letter text from OpenRouter for user {user_id}. Length: {len(generated_text)}")
+
+    except requests.exceptions.Timeout:
+        logger.error(f"OpenRouter API request timed out for user {user_id}.")
+        return Response({"error": "AI service request timed out."}, status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        logger.error(f"OpenRouter API request failed for user {user_id}: {e}")
+        error_detail = str(e)
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json() or e.response.text
+            except json.JSONDecodeError:
+                error_detail = e.response.text
+        return Response({"error": "Failed to communicate with AI service.", "detail": error_detail}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+    except Exception as e:
+        logger.error(f"Unexpected error during OpenRouter call for user {user_id}: {e}", exc_info=True)
+        return Response({"error": "An unexpected error occurred during AI processing."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # 6. Save Generated Cover Letter
+    try:
+        saved_letter = SavedCoverLetter.objects.create(
+            user_id=user_id,
+            cover_letter=generated_text,
+            job_title=job_title,
+            company_name=company_name
+        )
+        logger.info(f"Generated cover letter saved with ID {saved_letter.id} for user {user_id}.")
+    except Exception as e:
+        logger.error(f"Failed to save generated cover letter for user {user_id}: {e}", exc_info=True)
+        # Non-fatal? Return the text anyway, but maybe log warning/error
+        # Or return a specific error if saving is critical
+        return Response({
+            "error": "Failed to save the generated cover letter, but generation was successful.",
+            "cover_letter_text": generated_text # Still return the text
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    # 7. Return Response
+    output_serializer = GeneratedCoverLetterSerializer({
+        'saved_cover_letter_id': saved_letter.id,
+        'cover_letter_text': generated_text
+    })
+
+    logger.info(f"Successfully generated and saved cover letter {saved_letter.id} for user {user_id}.")
+    return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+# --- ViewSet for SavedCoverLetter CRUD ---
+
+class SavedCoverLetterViewSet(viewsets.ModelViewSet):
+    """
+    API endpoint for managing saved cover letters (CRUD).
+    Ensures users can only access their own saved letters.
+    """
+    serializer_class = SavedCoverLetterSerializer
+    # Rely on default authentication from settings
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """Filter results to only include cover letters owned by the requesting user."""
+        user = self.request.user
+        if user and user.is_authenticated:
+            # Filter SavedCoverLetter objects by the user_id field
+            # logger.debug(f"Filtering SavedCoverLetters for user {user.id}") # Optional: Remove debug log
+            return SavedCoverLetter.objects.filter(user_id=user.id)
+        # logger.warning("User not authenticated in SavedCoverLetterViewSet.get_queryset") # Optional: Remove debug log
+        return SavedCoverLetter.objects.none()
+
+    def perform_create(self, serializer):
+        """
+        Associate the saved cover letter with the logged-in user.
+        Note: Creation is typically handled by generate_cover_letter, 
+        but this allows direct POST if needed.
+        """
+        # logger.info(f"Performing create for SavedCoverLetter for user {self.request.user.id}") # Optional: Remove debug log
+        serializer.save(user_id=self.request.user.id)
+
+    # Remove the overridden update method
+    # def update(self, request, *args, **kwargs):
+    #    ...
+
+    # Remove the overridden http_method_not_allowed method
+    # def http_method_not_allowed(self, request, *args, **kwargs):
+    #    ...
+
+    # Default ModelViewSet methods for update/delete will be used, relying on get_queryset for security
