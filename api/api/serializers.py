@@ -285,3 +285,31 @@ class SavedCoverLetterSerializer(serializers.ModelSerializer):
         model = SavedCoverLetter
         fields = '__all__' # Include all fields: id, user_id, cover_letter, job_title, company_name, created_at, updated_at
         read_only_fields = ('id', 'user_id', 'created_at', 'updated_at') # User ID is set automatically
+
+# --- Serializer for ATS Scoring Input ---
+
+class JobDescriptionInputSerializer(serializers.Serializer):
+    """Serializer to validate the input for the ATS scoring endpoint."""
+    title = serializers.CharField(
+        required=False, # Title might be optional
+        allow_blank=True,
+        max_length=255,
+        help_text="The title of the job."
+    )
+    raw_text = serializers.CharField(
+        required=True,
+        allow_blank=False,
+        help_text="The full raw text of the job description."
+    )
+    required_skills = serializers.ListField(
+        child=serializers.CharField(max_length=100, allow_blank=False),
+        required=False, # Make optional, scorer can extract if missing
+        allow_empty=True,
+        help_text="List of required skills for the job."
+    )
+    preferred_skills = serializers.ListField(
+        child=serializers.CharField(max_length=100, allow_blank=False),
+        required=False, # Make optional, scorer can extract if missing
+        allow_empty=True,
+        help_text="List of preferred skills for the job."
+    )

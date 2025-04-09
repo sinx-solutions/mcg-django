@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, action, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied # Import PermissionDenied
 from .schemas import ParsedResumeSchema
 from django.http import Http404, HttpResponseBadRequest, JsonResponse
 import os
@@ -29,8 +30,9 @@ from authentication import SupabaseAuthentication
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiRequest, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 # Import the new serializer
-from .serializers import JobSearchQuerySerializer, GenerateCoverLetterInputSerializer, GeneratedCoverLetterSerializer, SavedCoverLetterSerializer
+from .serializers import JobSearchQuerySerializer, GenerateCoverLetterInputSerializer, GeneratedCoverLetterSerializer, SavedCoverLetterSerializer, ResumeDetailSerializer, JobDescriptionInputSerializer
 from django.utils.decorators import method_decorator # Import for decorating class methods/class
+from api.scoring.ats_scorer import ATSScorer # Ensure Scorer is imported
 
 # Configure logging for views
 logger = logging.getLogger('resume_api')
@@ -1651,102 +1653,137 @@ def save_parsed_resume(request):
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
         
-@api_view(['POST'])
+@extend_schema(
+    request=JobDescriptionInputSerializer,
+    responses={
+        200: OpenApiResponse(description="ATS Score result calculated successfully."),
+        400: OpenApiResponse(description="Invalid input data (check job description format). "),
+        401: OpenApiResponse(description="Authentication required."),
+        403: OpenApiResponse(description="Permission denied (resume does not belong to user)."),
+        404: OpenApiResponse(description="Resume not found."),
+        500: OpenApiResponse(description="Server error during scoring.")
+    },
+    summary="Score a Resume against a Job Description",
+    description="Takes a resume ID (from URL) and job description details (in request body), verifies ownership, performs ATS scoring, and returns the detailed score."
+)
+@api_view(['POST']) # Decorator to make it an API view accepting POST
+@csrf_exempt        # Exempt from CSRF as it uses JWT auth
+@permission_classes([IsAuthenticated]) # Require authentication
 def score_resume(request, resume_id):
     """
     Score a resume against a job description.
-    
-    Takes a resume_id and job description data, then returns an ATS score.
+    Requires authentication and checks resume ownership.
+    Takes job description data via POST body, validated by JobDescriptionInputSerializer.
     """
+    logger.info(f"score_resume called for resume_id: {resume_id} by user: {request.user.id}")
+    
     try:
-        # 1. Fetch Resume from DB
+        # 1. Fetch Resume from DB & Verify Ownership
         try:
             resume_obj = Resume.objects.get(id=resume_id)
-            # Serialize the data
+            logger.debug(f"Found resume object with ID: {resume_obj.id}")
+            
+            # --- Authorization Check --- 
+            # Convert request.user.id (str) to UUID for comparison
+            try:
+                request_user_uuid = uuid.UUID(request.user.id)
+            except (ValueError, TypeError):
+                # Handle cases where request.user.id is not a valid UUID string
+                logger.error(f"Invalid UUID format for request.user.id: {request.user.id}")
+                raise PermissionDenied("Invalid user identifier format.")
+
+            if resume_obj.user_id != request_user_uuid:
+                logger.warning(f"Permission denied: User {request.user.id} ({request_user_uuid}) attempted to score resume {resume_id} owned by {resume_obj.user_id}")
+                raise PermissionDenied("You do not have permission to score this resume.")
+            logger.debug(f"User {request.user.id} verified as owner of resume {resume_id}.")
+            # --- End Authorization Check ---
+
+            # Serialize the resume data
             serializer = ResumeDetailSerializer(resume_obj)
             resume_data = serializer.data
+            logger.debug("Resume data serialized successfully.")
+            
         except Resume.DoesNotExist:
+            logger.warning(f"Resume with ID {resume_id} not found.")
             return Response(
-                {"error": f"Resume with ID {resume_id} not found in the database."},
+                {"error": f"Resume with ID {resume_id} not found."},
                 status=status.HTTP_404_NOT_FOUND
             )
+        except PermissionDenied as pd:
+             # Re-raise PermissionDenied to be caught by DRF handler (returns 403)
+            raise pd
+        except Exception as e:
+            logger.error(f"Error fetching resume {resume_id}: {e}", exc_info=True)
+            return Response({"error": "Error retrieving resume."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-        # 2. Get Job Description data from request
-        job_data = request.data
-        if not job_data:
+        # 2. Validate Job Description data from request using the new serializer
+        jd_serializer = JobDescriptionInputSerializer(data=request.data)
+        if not jd_serializer.is_valid():
+            logger.error(f"Invalid job description input: {jd_serializer.errors}")
             return Response(
-                {"error": "No job description data provided in request."},
+                {"error": "Invalid job description data provided.", "details": jd_serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        # Use the validated data dictionary
+        job_data = jd_serializer.validated_data 
+        logger.debug("Job description data validated successfully.")
             
-        # Ensure job_data has required fields
-        if not job_data.get('raw_text'):
-            return Response(
-                {"error": "Job description must include 'raw_text' field."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # 3. Preprocess Resume Data for Scorer
+        # 3. Preprocess Resume Data for Scorer (Remains largely the same)
         resume_data_for_scorer = resume_data.copy()
-        
-        # Rename 'work_experiences' to 'experience' for scorer compatibility
         if 'work_experiences' in resume_data_for_scorer:
             resume_data_for_scorer['experience'] = resume_data_for_scorer.pop('work_experiences')
         else:
             resume_data_for_scorer['experience'] = []
-            
-        # Construct substitute raw_text from structured data if not present
+        
+        # Construct substitute raw_text if needed (though might be less critical now)
+        # Consider if scorer should always rely on structured data if available?
         if not resume_data_for_scorer.get('raw_text'):
             resume_raw_text_parts = [
                 resume_data_for_scorer.get('summary', ''),
                 resume_data_for_scorer.get('job_title', ''),
             ]
-            # Use 'experience' key now
-            for exp in resume_data_for_scorer.get('experience', []):
-                resume_raw_text_parts.append(exp.get('position', ''))
-                resume_raw_text_parts.append(exp.get('company', ''))
-                resume_raw_text_parts.append(exp.get('description', ''))
+            for exp in resume_data_for_scorer.get('experience', []): # Use 'experience'
+                 resume_raw_text_parts.extend(filter(None, [exp.get('position'), exp.get('company'), exp.get('description')]))
             for edu in resume_data_for_scorer.get('educations', []):
-                resume_raw_text_parts.append(edu.get('degree', ''))
-                resume_raw_text_parts.append(edu.get('school', ''))
+                 resume_raw_text_parts.extend(filter(None, [edu.get('degree'), edu.get('school')]))
+            # ... (continue for projects, certs, custom sections, skills as before) ...
             for proj in resume_data_for_scorer.get('projects', []):
-                resume_raw_text_parts.append(proj.get('title', ''))
-                resume_raw_text_parts.append(proj.get('description', ''))
+                resume_raw_text_parts.extend(filter(None,[proj.get('title'), proj.get('description')]))
             for cert in resume_data_for_scorer.get('certifications', []):
-                resume_raw_text_parts.append(cert.get('name', ''))
-                resume_raw_text_parts.append(cert.get('issuer', ''))
+                resume_raw_text_parts.extend(filter(None,[cert.get('name'), cert.get('issuer')]))
             for section in resume_data_for_scorer.get('custom_sections', []):
                 resume_raw_text_parts.append(section.get('title',''))
                 for item in section.get('items', []):
-                    resume_raw_text_parts.append(item.get('title', ''))
-                    resume_raw_text_parts.append(item.get('description', ''))
+                    resume_raw_text_parts.extend(filter(None,[item.get('title'), item.get('description')]))
             resume_raw_text_parts.extend(resume_data_for_scorer.get('skills', []))
             
             resume_data_for_scorer['raw_text'] = ' '.join(filter(None, resume_raw_text_parts))
+            logger.debug("Constructed substitute resume raw_text.")
+        else:
+             logger.debug("Using existing resume raw_text.")
             
         # 4. Initialize and Run Scorer
         try:
-            # Import here to avoid circular imports
-            from api.scoring.ats_scorer import ATSScorer
             scorer = ATSScorer()
+            logger.debug("ATS Scorer initialized.")
+            # Pass the validated job_data dictionary to the scorer
             result = scorer.score_resume(resume_data_for_scorer, job_data)
+            logger.info(f"Scoring complete for resume {resume_id}. Overall score: {result.get('overall_score', 'N/A')}")
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
-            logger.error(f"Error during scoring: {e}")
-            logger.exception("Scoring error details:")
+            logger.error(f"Error during scoring for resume {resume_id}: {e}", exc_info=True)
             return Response(
                 {"error": f"Error scoring resume: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             
     except Exception as e:
-        logger.error(f"Unexpected error in score_resume view: {e}")
-        logger.exception("Error details:")
+        # Catch any unexpected errors in the main try block
+        logger.error(f"Unexpected error in score_resume view for resume {resume_id}: {e}", exc_info=True)
         return Response(
-            {"error": f"Unexpected error: {str(e)}"},
+            {"error": f"An unexpected error occurred: {str(e)}"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
 
 # --- Imports for Job Search Agent API ---
 import sys
