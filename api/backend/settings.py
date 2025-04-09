@@ -168,7 +168,9 @@ CORS_ALLOW_ALL_ORIGINS = False
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'authentication.SupabaseAuthentication', # Still attempts auth if token provided
+        # Add SessionAuthentication first for browser/admin access
+        'rest_framework.authentication.SessionAuthentication',
+        'authentication.SupabaseAuthentication', # Then check for Supabase JWT
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny', # Allows requests even if not authenticated
@@ -182,4 +184,6 @@ SPECTACULAR_SETTINGS = {
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
+    # Restrict schema/UI access to admin users (is_staff=True)
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],
 }
