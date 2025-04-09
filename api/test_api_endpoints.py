@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 # API base URL
-BASE_URL = "http://localhost:8000/api"
+BASE_URL = "http://mcg-be.sinxsolutions.ai/api"
 
 # Initialize rich console for pretty output
 console = Console()
