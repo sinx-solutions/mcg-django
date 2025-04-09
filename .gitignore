@@ -1,4 +1,5 @@
 api/env
+api/.env copy
 testresume/scoring/.venv
 # Python
 __pycache__/
