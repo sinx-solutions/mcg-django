@@ -187,3 +187,17 @@ SPECTACULAR_SETTINGS = {
     # Restrict schema/UI access to admin users (is_staff=True)
     'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],
 }
+
+# Add the origins users will access the site from
+CSRF_TRUSTED_ORIGINS = [
+    'https://mcg-be.sinxsolutions.ai',
+    # Add others if necessary, e.g., for local testing:
+    # 'http://localhost:8000',
+    # 'http://127.0.0.1:8000',
+]
+
+# --- Important Security Settings for Production ---
+# Make sure these are TRUE if your site is served over HTTPS
+CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = True
+# --------------------------------------------------
