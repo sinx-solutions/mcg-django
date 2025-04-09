@@ -10,7 +10,7 @@ anthropic
 anyio
 appnope; sys_platform == "darwin"
 appscript; sys_platform == "darwin"
-
+accelerate
 APScheduler
 argon2-cffi
 argon2-cffi-bindings

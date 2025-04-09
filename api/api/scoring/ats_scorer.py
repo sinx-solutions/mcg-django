@@ -11,7 +11,7 @@ from nltk.tokenize import word_tokenize
 import json
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 import calendar
 from accelerate import init_empty_weights
 
@@ -298,7 +298,7 @@ class ATSScorer:
         if 'experience' in resume_data and isinstance(resume_data['experience'], list):
             logger.debug("Attempting experience calculation from structured start_date/end_date fields...")
             calculated_total_duration = 0
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
 
             for job in resume_data['experience']:
                 if isinstance(job, dict):
@@ -307,13 +307,24 @@ class ATSScorer:
 
                     if start_date_str: # Must have a start date
                         try:
-                            start_date_dt = datetime.strptime(start_date_str, '%Y-%m-%d')
-                            
+                            # Replace Z with +00:00 for better fromisoformat compatibility
+                            start_iso_str = start_date_str.replace('Z', '+00:00')
+                            start_date_dt = datetime.fromisoformat(start_iso_str)
+
                             if end_date_str:
-                                end_date_dt = datetime.strptime(end_date_str, '%Y-%m-%d')
+                                end_iso_str = end_date_str.replace('Z', '+00:00')
+                                end_date_dt = datetime.fromisoformat(end_iso_str)
                             else:
                                 # If end_date is None or empty string, assume 'Present'
+                                # Make 'now' timezone-aware (UTC) for consistent comparison
+                                now = datetime.now(timezone.utc)
                                 end_date_dt = now
+
+                            # Ensure both dates are timezone-aware (UTC) or both naive before comparison
+                            # fromisoformat with +00:00 makes them aware.
+                            # If start_date was naive and end_date is aware 'now', make start_date aware.
+                            # (This part might need refinement based on actual data variance,
+                            # but assuming ISO format with Z or None/Present is the primary case)
 
                             if end_date_dt >= start_date_dt:
                                 delta = end_date_dt - start_date_dt
@@ -321,10 +332,11 @@ class ATSScorer:
                                 logger.debug(f"  Calculated duration {duration:.2f} years for job '{job.get('position')}' ({start_date_str} to {end_date_str or 'Present'}).")
                                 calculated_total_duration += duration
                             else:
-                                logger.warning(f"  End date {end_date_str} is before start date {start_date_str} for job '{job.get('position')}'. Skipping duration.")
+                                logger.warning(f"  End date {end_date_str} is before start date {start_date_str} for job '{job.get('position')}. Skipping duration.")
 
                         except ValueError as date_err:
-                            logger.warning(f"  Could not parse YYYY-MM-DD date for job '{job.get('position')}': '{start_date_str}' or '{end_date_str}'. Error: {date_err}")
+                            # Keep the original warning if fromisoformat fails
+                            logger.warning(f"  Could not parse ISO date for job '{job.get('position')}': '{start_date_str}' or '{end_date_str}'. Error: {date_err}")
                         except Exception as e:
                              logger.error(f"  Unexpected error processing dates for job '{job.get('position')}': {e}")
                     else:
