@@ -18,7 +18,8 @@ from .views import (
     enhance_work_experience,
     enhance_project,
     enhance_certification,
-    enhance_custom_section_item
+    enhance_custom_section_item,
+    suggest_skills_v2
 )
 
 # Create a router and register our viewsets
@@ -45,4 +46,5 @@ urlpatterns = [
     path('enhance-project/', enhance_project, name='enhance-project'),
     path('enhance-certification/', enhance_certification, name='enhance-certification'),
     path('enhance-custom-section-item/', enhance_custom_section_item, name='enhance-custom-section-item'),
+    path('suggest-skills/', suggest_skills_v2, name='suggest-skills'),
 ]

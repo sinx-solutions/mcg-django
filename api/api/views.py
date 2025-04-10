@@ -3005,3 +3005,164 @@ def enhance_custom_section_item(request):
                 
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'field_of_work': {
+                    'type': 'string',
+                    'description': 'Field of work or industry'
+                },
+                'experience_level': {
+                    'type': 'string',
+                    'description': 'Years of experience or experience level'
+                },
+                'resume_data': {
+                    'type': 'object',
+                    'properties': {
+                        'job_title': {
+                            'type': 'string',
+                            'description': 'Current or target job title'
+                        },
+                        'work_experiences': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'object',
+                                'properties': {
+                                    'position': {'type': 'string'},
+                                    'company': {'type': 'string'},
+                                    'description': {'type': 'string'}
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            'required': ['field_of_work', 'experience_level']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="List of suggested skills.",
+            response={
+                'type': 'array',
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'id': {'type': 'string'},
+                        'label': {'type': 'string'}
+                    }
+                }
+            }
+        ),
+        400: OpenApiResponse(description="Invalid input data."),
+        500: OpenApiResponse(description="Server error during skill suggestion.")
+    },
+    summary="Suggest skills based on field, experience level and resume data",
+    description="Takes professional details and returns suggested skills in id/label format. No authentication required."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def suggest_skills_v2(request):
+    # Get data from request
+    data = request.data
+    
+    # Validate required fields
+    if 'field_of_work' not in data or not data['field_of_work']:
+        return Response({'error': 'Field of work is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'experience_level' not in data or not data['experience_level']:
+        return Response({'error': 'Experience level is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    field_of_work = data['field_of_work']
+    experience_level = data['experience_level']
+    resume_data = data.get('resume_data', {})
+    
+    job_title = resume_data.get('job_title', '')
+    work_experiences = resume_data.get('work_experiences', [])
+    
+    try:
+        # Get Claude client
+        client = get_claude_client()
+        
+        # Build the prompt
+        system_message = """
+        You are an AI expert in suggesting relevant skills for resumes. Return a JSON array of skill objects.
+        Each object should have an 'id' (lowercase with underscores) and 'label' (display text) property.
+        Example format:
+        [
+          {"id": "skill_name", "label": "Skill Display Name"},
+          {"id": "another_skill", "label": "Another Skill"}
+        ]
+        Keep the suggestions relevant and appropriate for the experience level and field of work.
+        Include both technical and soft skills where appropriate.
+        Limit the response to 15-20 most relevant skills.
+        !!IMPORTANT - only return the JSON response and no other text symbols outside the JSON response
+        """
+        
+        # Format work experience if available
+        work_exp_text = ""
+        if work_experiences:
+            work_exp_text = "Work Experience:\n"
+            for exp in work_experiences:
+                position = exp.get('position', 'N/A')
+                company = exp.get('company', 'N/A')
+                description = exp.get('description', 'N/A')
+                work_exp_text += f"- {position} at {company} description: {description}\n"
+        else:
+            work_exp_text = "Work Experience: None\n"
+        
+        user_message = f"""
+        Please suggest relevant skills for:
+        Field: {field_of_work}
+        Experience Level: {experience_level} years
+
+        Current Resume Data:
+        Job Title: {job_title or 'N/A'}
+        {work_exp_text}
+
+        Please suggest relevant skills for this profile.
+        """
+        
+        # Call the Anthropic API
+        response = client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=512,
+            system=system_message,
+            messages=[{"role": "user", "content": user_message}]
+        )
+        
+        # Extract the response
+        ai_response = response.content[0].text.strip()
+        
+        # Extract JSON using regex pattern in case Claude wraps it in markdown
+        json_pattern = re.compile(r'```(?:json)?\s*(.*?)```', re.DOTALL)
+        json_match = json_pattern.search(ai_response)
+        
+        if json_match:
+            # Use the extracted JSON string
+            json_str = json_match.group(1).strip()
+            suggested_skills = json.loads(json_str)
+        else:
+            # Try parsing the whole response directly
+            try:
+                suggested_skills = json.loads(ai_response)
+            except json.JSONDecodeError:
+                # Log the error
+                print(f"Error parsing suggested skills AI response: {ai_response[:1000]}")
+                return Response(
+                    {'error': 'Failed to parse AI response', 'raw_response': ai_response}, 
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        return Response(suggested_skills, status=status.HTTP_200_OK)
+            
+    except Exception as e:
+        # Log the error
+        print(f"Error suggesting skills: {e}")
+        return Response(
+            {'error': f'Failed to suggest skills: {str(e)}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
