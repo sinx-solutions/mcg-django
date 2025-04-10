@@ -179,7 +179,11 @@ REST_FRAMEWORK = {
     ],
     # Add throttling configuration
     'DEFAULT_THROTTLE_RATES': {
-        'ai_endpoints': '10/hour',  # 10 requests per hour for AI endpoints
+        'enhance_work_experience': '10/hour',    # 10 requests per hour for enhance_work_experience
+        'enhance_project': '10/hour',            # 10 requests per hour for enhance_project
+        'enhance_certification': '10/hour',      # 10 requests per hour for enhance_certification
+        'enhance_custom_section_item': '10/hour', # 10 requests per hour for enhance_custom_section_item
+        'suggest_skills': '10/hour',             # 10 requests per hour for suggest_skills
     },
 }
 

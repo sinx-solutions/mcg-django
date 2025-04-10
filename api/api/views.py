@@ -34,7 +34,13 @@ from .serializers import JobSearchQuerySerializer, GenerateCoverLetterInputSeria
 from django.utils.decorators import method_decorator # Import for decorating class methods/class
 from api.scoring.ats_scorer import ATSScorer # Ensure Scorer is imported
 from rest_framework.throttling import UserRateThrottle
-from .throttling import AIEndpointRateThrottle
+from .throttling import (
+    EnhanceWorkExperienceRateThrottle,
+    EnhanceProjectRateThrottle,
+    EnhanceCertificationRateThrottle,
+    EnhanceCustomSectionItemRateThrottle,
+    SuggestSkillsRateThrottle
+)
 
 # Configure logging for views
 logger = logging.getLogger('resume_api')
@@ -2490,7 +2496,7 @@ class SavedCoverLetterViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
-@throttle_classes([AIEndpointRateThrottle])
+@throttle_classes([EnhanceWorkExperienceRateThrottle])
 def enhance_work_experience(request):
     """API endpoint to enhance a work experience description without requiring an ID."""
     try:
@@ -2639,7 +2645,7 @@ def enhance_work_experience(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
-@throttle_classes([AIEndpointRateThrottle])
+@throttle_classes([EnhanceProjectRateThrottle])
 def enhance_project(request):
     """API endpoint to enhance a project description without requiring an ID."""
     try:
@@ -2787,7 +2793,7 @@ def enhance_project(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
-@throttle_classes([AIEndpointRateThrottle])
+@throttle_classes([EnhanceCertificationRateThrottle])
 def enhance_certification(request):
     """API endpoint to enhance a certification description without requiring authentication."""
     try:
@@ -2912,7 +2918,7 @@ def enhance_certification(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
-@throttle_classes([AIEndpointRateThrottle])
+@throttle_classes([EnhanceCustomSectionItemRateThrottle])
 def enhance_custom_section_item(request):
     # Get data from request
     data = request.data
@@ -3072,7 +3078,7 @@ def enhance_custom_section_item(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
-@throttle_classes([AIEndpointRateThrottle])
+@throttle_classes([SuggestSkillsRateThrottle])
 def suggest_skills_v2(request):
     # Get data from request
     data = request.data
