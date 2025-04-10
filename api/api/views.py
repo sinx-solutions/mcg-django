@@ -2861,3 +2861,147 @@ def enhance_certification(request):
             {'error': 'Failed to enhance certification'}, # Generic error for client
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'title': {
+                    'type': 'string',
+                    'description': 'Section title (e.g., Hobbies, Achievements, etc.)'
+                },
+                'itemTitle': {
+                    'type': 'string',
+                    'description': 'Specific item title within the section'
+                },
+                'description': {
+                    'type': 'string',
+                    'description': 'Current description to enhance'
+                },
+                'startDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Start date if applicable'
+                },
+                'endDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'End date if applicable'
+                }
+            },
+            'required': ['title', 'itemTitle', 'description']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Enhanced description generated.", 
+            response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
+        ),
+        400: OpenApiResponse(description="Invalid input data."),
+        500: OpenApiResponse(description="Server error during enhancement.")
+    },
+    summary="Enhance custom section item description using AI",
+    description="Takes custom section item details and uses AI to generate an improved description. No authentication required."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def enhance_custom_section_item(request):
+    # Get data from request
+    data = request.data
+    
+    # Validate required fields
+    if 'title' not in data or not data['title']:
+        return Response({'error': 'Section title is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'itemTitle' not in data or not data['itemTitle']:
+        return Response({'error': 'Item title is required'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'description' not in data or not data['description']:
+        return Response({'error': 'Description is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Extract fields
+    section_title = data['title']
+    item_title = data['itemTitle']
+    description = data['description']
+    start_date = data.get('startDate', None)
+    end_date = data.get('endDate', None)
+    
+    # Date context
+    date_context = ""
+    if start_date and end_date:
+        date_context = f"Time Period: {start_date} to {end_date}"
+    elif start_date:
+        date_context = f"Started: {start_date}"
+    elif end_date:
+        date_context = f"Completed: {end_date}"
+    
+    try:
+        # Get Claude client
+        client = get_claude_client()
+        
+        # Build the prompt
+        system_message = """
+        You are an AI expert in optimizing resume content. Your task is to enhance the description for a custom section item to be:
+        1. ATS-compliant
+        2. Achievement-oriented
+        3. Clear and professional
+        4. Relevant to the section's purpose
+        
+        Return the response as a JSON object with a 'description' field containing bullet points with line breaks.
+        Example format:
+        {
+          "description": "• Led key initiatives in [specific area]\\n• Demonstrated expertise in [relevant skill]\\n• Achieved [specific outcome] through [action taken]"
+        }
+
+        Guidelines:
+        - Start each bullet point with •
+        - Use \\n for new lines
+        - Focus on relevant achievements and skills
+        - Keep it professional and concise
+        - Only return the JSON response, no other text
+        """
+        
+        user_message = f"""
+        Please enhance this custom section item description to be more impactful and ATS-compliant:
+
+        Section Title: {section_title}
+        Item Title: {item_title}
+        Current Description: {description}
+        {date_context if date_context else ""}
+
+        Please structure the response to:
+        1. Align with the section's purpose
+        2. Highlight relevant achievements
+        3. Use industry-appropriate terminology
+        4. Maintain professional tone
+        """
+        
+        # Call the Anthropic API
+        response = client.messages.create(
+            model="claude-3-opus-20240229",
+            max_tokens=1000,
+            system=system_message,
+            messages=[{"role": "user", "content": user_message}]
+        )
+        
+        # Extract the response
+        ai_response = response.content[0].text
+        
+        # Parse JSON response
+        try:
+            response_json = json.loads(ai_response)
+            enhanced_description = response_json.get('description', '')
+            
+            return Response({'description': enhanced_description}, status=status.HTTP_200_OK)
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract description using regex
+            import re
+            match = re.search(r'["{].*description["\s]*:[\s"]*(.*?)["}\n]', ai_response, re.DOTALL)
+            if match:
+                enhanced_description = match.group(1)
+                return Response({'description': enhanced_description}, status=status.HTTP_200_OK)
+            else:
+                return Response({'error': 'Failed to parse AI response', 'raw_response': ai_response}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
