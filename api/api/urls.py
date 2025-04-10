@@ -16,7 +16,8 @@ from .views import (
     generate_cover_letter,
     SavedCoverLetterViewSet,
     enhance_work_experience,
-    enhance_project
+    enhance_project,
+    enhance_certification
 )
 
 # Create a router and register our viewsets
@@ -41,4 +42,5 @@ urlpatterns = [
     path('generate-cover-letter/', generate_cover_letter, name='generate-cover-letter'),
     path('enhance-work-experience/', enhance_work_experience, name='enhance-work-experience'),
     path('enhance-project/', enhance_project, name='enhance-project'),
+    path('enhance-certification/', enhance_certification, name='enhance-certification'),
 ]

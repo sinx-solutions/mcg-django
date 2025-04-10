@@ -1013,33 +1013,153 @@ class CertificationViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Invalid resume ID format.")
 
-    @action(detail=True, methods=['post'])
+    @extend_schema(
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'name': {
+                        'type': 'string',
+                        'description': 'Certification name'
+                    },
+                    'issuer': {
+                        'type': 'string',
+                        'description': 'Certification issuer/organization'
+                    },
+                    'description': {
+                        'type': 'string',
+                        'description': 'Current certification description to enhance'
+                    },
+                    'issueDate': {
+                        'type': 'string',
+                        'format': 'date-time',
+                        'description': 'Date the certification was issued'
+                    },
+                    'expiryDate': {
+                        'type': 'string',
+                        'format': 'date-time',
+                        'description': 'Date the certification expires'
+                    }
+                },
+                'required': ['name', 'issuer']
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description="Enhanced description generated.", 
+                response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
+            ),
+            400: OpenApiResponse(description="Invalid input data."),
+            500: OpenApiResponse(description="Server error during enhancement.")
+        },
+        summary="Enhance certification description using AI",
+        description="Takes certification description and uses AI to generate an improved description. No authentication required."
+    )
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def enhance(self, request, pk=None):
-        """ Enhance certification description using Claude AI. Requires auth and ownership. """
+        """API endpoint to enhance a certification description without requiring an ID."""
         try:
-            certification = self.get_object()
-            # ... (Enhance logic - potentially less common for certs, maybe enhance name/issuer?) ...
-            # Example: Focus on verifying or finding more details
-            name = certification.name or ""
-            issuer = certification.issuer or ""
+            # Validate that name and issuer are provided
+            if not request.data or 'name' not in request.data or 'issuer' not in request.data:
+                return Response(
+                    {'error': 'You must provide certification name and issuer'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            name = request.data.get('name', "Not specified")
+            issuer = request.data.get('issuer', "Not specified")
+            issue_date = request.data.get('issueDate', "")
+            expiry_date = request.data.get('expiryDate', "")
+            current_description = request.data.get('description', "")
+            
+            client = get_claude_client()
+            
+            # Prepare prompt for Claude
+            prompt = f"""
+            You are an AI expert in optimizing certification descriptions for resumes. Your task is to enhance certification descriptions to be:
+            1. ATS-compliant
+            2. Focused on relevance and value
+            3. Clear and professional
+            4. Highlighting skills gained
+            
+            Return the response as a JSON object with a 'description' field containing bullet points with line breaks.
+            Example format:
+            {{
+              "description": "• Advanced certification demonstrating expertise in cloud architecture and deployment\\n• Mastered key concepts including scalability, security, and cost optimization\\n• Applied knowledge to successfully migrate 3 enterprise applications to cloud infrastructure"
+            }}
 
-            # For certs, enhancement might mean validation or suggesting keywords
-            # Placeholder: Return original data or a simple message
-            return Response({
-                "message": "Enhancement for certifications is not yet implemented.",
-                "name": name,
-                "issuer": issuer
-            }, status=status.HTTP_200_OK)
+            Guidelines:
+            - Start each bullet point with •
+            - Use \\n for new lines
+            - Emphasize skills and knowledge gained
+            - Highlight practical applications
+            - Include relevant technical competencies
+            - Keep it to 2-3 bullet points
+            - Only return the JSON response, no other text
+            """
+            
+            user_message = f"""
+            Please enhance this certification description to be more impactful and ATS-compliant:
 
-        except Certification.DoesNotExist: # Handled by get_object
-            return Response(
-                {'error': 'Certification not found or access denied'},
-                status=status.HTTP_404_NOT_FOUND
+            Certification Name: {name}
+            Issuing Organization: {issuer}
+            Issue Date: {issue_date}
+            Expiry Date: {expiry_date}
+            Current Description: {current_description}
+
+            Please structure the response to highlight:
+            1. Skills and knowledge gained
+            2. Practical applications
+            3. Relevance to professional growth
+            """
+            
+            # Call Claude API with both system and user messages
+            message = client.messages.create(
+                model="claude-3-7-sonnet-20250219",
+                max_tokens=512,
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_message}
+                ]
             )
+            
+            # Extract enhanced description
+            response_text = message.content[0].text.strip()
+            
+            # Parse the JSON response
+            try:
+                # Try to parse the JSON response from Claude
+                import json
+                response_json = json.loads(response_text)
+                
+                # Get the description value from the response
+                enhanced_description = response_json.get("description", "")
+                
+                # Return only the description value, not nested in another JSON object
+                return Response({
+                    "description": enhanced_description
+                }, status=status.HTTP_200_OK)
+                
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract using regex
+                import re
+                match = re.search(r'"description":\s*"([^"]*)"', response_text)
+                if match:
+                    enhanced_description = match.group(1)
+                    return Response({
+                        "description": enhanced_description
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        "error": "Failed to parse AI response",
+                        "raw_response": response_text
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
         except Exception as e:
+            # Log the error
             print(f"Error enhancing certification: {e}")
             return Response(
-                {'error': 'Failed to enhance certification'},
+                {'error': 'Failed to enhance certification'}, # Generic error for client
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -2560,7 +2680,7 @@ def enhance_project(request):
 
         Guidelines:
         - Start each bullet point with •
-        - Use \\n for new lines
+        - Use \\\\n for new lines
         - Focus on achievements and impact
         - Use strong action verbs
         - Include metrics and numbers when possible
@@ -2615,5 +2735,129 @@ def enhance_project(request):
         print(f"Error enhancing project: {e}")
         return Response(
             {'error': 'Failed to enhance project'}, # Generic error for client
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'name': {
+                    'type': 'string',
+                    'description': 'Certification name'
+                },
+                'issuer': {
+                    'type': 'string',
+                    'description': 'Certification issuer'
+                },
+                'description': {
+                    'type': 'string',
+                    'description': 'Current certification description'
+                },
+                'issueDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Issue date of the certification'
+                },
+                'expiryDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Expiry date of the certification'
+                }
+            },
+            'required': ['name', 'issuer']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Enhanced description generated.", 
+            response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
+        ),
+        400: OpenApiResponse(description="Invalid input data."),
+        500: OpenApiResponse(description="Server error during enhancement.")
+    },
+    summary="Enhance certification description using AI",
+    description="Takes certification details and uses AI to generate an improved description. No authentication required."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def enhance_certification(request):
+    """API endpoint to enhance a certification description without requiring authentication."""
+    try:
+        # Validate that required fields are provided
+        if not request.data:
+            return Response(
+                {'error': 'You must provide certification data to enhance'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check for required fields
+        if 'name' not in request.data or 'issuer' not in request.data:
+            return Response(
+                {'error': 'Name and issuer are required fields'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        name = request.data.get('name')
+        issuer = request.data.get('issuer')
+        current_description = request.data.get('description', "")
+        issue_date = request.data.get('issueDate', "Not specified")
+        expiry_date = request.data.get('expiryDate', "Not specified")
+        
+        client = get_claude_client()
+        
+        # Prepare prompt for Claude
+        prompt = f"""
+        You are an AI career assistant. Enhance the following certification description for a resume.
+        Make it more impactful, ATS-compliant, and focused on the skills and knowledge gained.
+        
+        Certification Name: {name}
+        Issuer: {issuer}
+        Issue Date: {issue_date}
+        Expiry Date: {expiry_date}
+        Current Description: {current_description}
+        
+        Provide an enhanced description that:
+        1. Highlights the skills and knowledge demonstrated by this certification
+        2. Emphasizes practical applications of the certification
+        3. Is concise yet comprehensive
+        4. Is relevant to professional growth and career advancement
+        5. Is formatted in bullet points for readability
+        
+        Return the response as plain text with bullet points.
+        
+        Guidelines:
+        - Start each bullet point with •
+        - Use a new line for each bullet point
+        - Focus on the value and relevance of the certification
+        - Highlight specific skills gained
+        - Make it ATS-friendly with relevant keywords
+        - Keep it to 3-5 bullet points
+        """
+        
+        # Call Claude API
+        message = client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Extract enhanced description
+        enhanced_description = message.content[0].text.strip()
+        
+        # Return only the description value, not nested in a 'description' field
+        return Response({
+            "description": enhanced_description
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        # Log the error
+        print(f"Error enhancing certification: {e}")
+        return Response(
+            {'error': 'Failed to enhance certification'}, # Generic error for client
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
