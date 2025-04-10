@@ -177,6 +177,10 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny', # Allows requests even if not authenticated
     ],
+    # Add throttling configuration
+    'DEFAULT_THROTTLE_RATES': {
+        'ai_endpoints': '10/hour',  # 10 requests per hour for AI endpoints
+    },
 }
 
 # drf-spectacular settings

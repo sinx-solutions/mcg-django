@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from rest_framework import viewsets, status, filters
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, action, parser_classes, permission_classes
+from rest_framework.decorators import api_view, action, parser_classes, permission_classes, throttle_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied # Import PermissionDenied
@@ -33,6 +33,8 @@ from drf_spectacular.types import OpenApiTypes
 from .serializers import JobSearchQuerySerializer, GenerateCoverLetterInputSerializer, GeneratedCoverLetterSerializer, SavedCoverLetterSerializer, ResumeDetailSerializer, JobDescriptionInputSerializer
 from django.utils.decorators import method_decorator # Import for decorating class methods/class
 from api.scoring.ats_scorer import ATSScorer # Ensure Scorer is imported
+from rest_framework.throttling import UserRateThrottle
+from .throttling import AIEndpointRateThrottle
 
 # Configure logging for views
 logger = logging.getLogger('resume_api')
@@ -2488,6 +2490,7 @@ class SavedCoverLetterViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
+@throttle_classes([AIEndpointRateThrottle])
 def enhance_work_experience(request):
     """API endpoint to enhance a work experience description without requiring an ID."""
     try:
@@ -2636,6 +2639,7 @@ def enhance_work_experience(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
+@throttle_classes([AIEndpointRateThrottle])
 def enhance_project(request):
     """API endpoint to enhance a project description without requiring an ID."""
     try:
@@ -2751,19 +2755,19 @@ def enhance_project(request):
                     'type': 'string',
                     'description': 'Certification issuer'
                 },
+                'startDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Certification start date'
+                },
+                'endDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Certification end date'
+                },
                 'description': {
                     'type': 'string',
                     'description': 'Current certification description'
-                },
-                'issueDate': {
-                    'type': 'string',
-                    'format': 'date',
-                    'description': 'Issue date of the certification'
-                },
-                'expiryDate': {
-                    'type': 'string',
-                    'format': 'date',
-                    'description': 'Expiry date of the certification'
                 }
             },
             'required': ['name', 'issuer']
@@ -2771,7 +2775,7 @@ def enhance_project(request):
     },
     responses={
         200: OpenApiResponse(
-            description="Enhanced description generated.", 
+            description="Enhanced certification description generated.", 
             response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
         ),
         400: OpenApiResponse(description="Invalid input data."),
@@ -2783,6 +2787,7 @@ def enhance_project(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
+@throttle_classes([AIEndpointRateThrottle])
 def enhance_certification(request):
     """API endpoint to enhance a certification description without requiring authentication."""
     try:
@@ -2803,8 +2808,8 @@ def enhance_certification(request):
         name = request.data.get('name')
         issuer = request.data.get('issuer')
         current_description = request.data.get('description', "")
-        issue_date = request.data.get('issueDate', "Not specified")
-        expiry_date = request.data.get('expiryDate', "Not specified")
+        issue_date = request.data.get('startDate', "Not specified")
+        expiry_date = request.data.get('endDate', "Not specified")
         
         client = get_claude_client()
         
@@ -2907,6 +2912,7 @@ def enhance_certification(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
+@throttle_classes([AIEndpointRateThrottle])
 def enhance_custom_section_item(request):
     # Get data from request
     data = request.data
@@ -3066,6 +3072,7 @@ def enhance_custom_section_item(request):
 @api_view(['POST'])
 @csrf_exempt
 @permission_classes([AllowAny])
+@throttle_classes([AIEndpointRateThrottle])
 def suggest_skills_v2(request):
     # Get data from request
     data = request.data
