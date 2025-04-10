@@ -187,7 +187,7 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
     # OTHER SETTINGS
     # Restrict schema/UI access to admin users (is_staff=True)
-    'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
 }
 
 # Add the origins users will access the site from

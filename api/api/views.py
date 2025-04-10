@@ -3,7 +3,7 @@ from rest_framework import viewsets, status, filters
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, action, parser_classes, permission_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import PermissionDenied # Import PermissionDenied
 from .schemas import ParsedResumeSchema
 from django.http import Http404, HttpResponseBadRequest, JsonResponse
@@ -320,22 +320,67 @@ class ResumeViewSet(viewsets.ModelViewSet):
             logger.error(f"Error updating resume: {str(e)}")
             raise
 
-    @action(detail=True, methods=['post'])
+    @extend_schema(
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'resume_data': {
+                        'type': 'object',
+                        'description': 'Complete resume data for non-authenticated users'
+                    }
+                }
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description="Summary generated successfully.", 
+                response={'type': 'object', 'properties': {'summary': {'type': 'string'}}}
+            ),
+            404: OpenApiResponse(description="Resume not found or access denied."),
+            500: OpenApiResponse(description="Server error during generation.")
+        },
+        summary="Generate a professional summary using AI",
+        description="Generates a professional summary from resume data. Can be used with either a resume ID (for authenticated users) or complete resume data in the request (for non-authenticated users)."
+    )
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def generate_summary(self, request, pk=None):
         """
-        Generate a professional summary using Claude AI based on resume information
-        Requires authentication and ownership.
+        Generate a professional summary using Claude AI based on resume information.
+        Can be used with either:
+        1. A resume ID (authenticated users with saved resumes)
+        2. Complete resume data in the request body (non-authenticated users)
         """
         try:
-            resume = self.get_object() # Ensures user owns the resume
-            
-            # Get detailed data for the resume
-            serializer = ResumeDetailSerializer(resume)
-            resume_data = serializer.data
+            # Check if resume data is provided in the request
+            if request.data and 'resume_data' in request.data:
+                # For unauthenticated users sending resume data from local state
+                resume_data = request.data['resume_data']
+                # No need to save the resume or the generated summary for unauthenticated users
+                save_to_db = False
+            else:
+                # For authenticated users using existing resume by ID
+                try:
+                    resume = self.get_object()  # Ensures user owns the resume if authenticated
+                    # Get detailed data for the resume
+                    serializer = ResumeDetailSerializer(resume)
+                    resume_data = serializer.data
+                    save_to_db = True
+                except (PermissionDenied, Resume.DoesNotExist):
+                    # If user is not authenticated or doesn't own the resume and didn't provide resume_data
+                    return Response(
+                        {'error': 'You must either provide resume data or be authenticated and own this resume'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             client = get_claude_client()
             
             # Prepare prompt for Claude
+            first_name = resume_data.get('first_name', '')
+            last_name = resume_data.get('last_name', '')
+            job_title = resume_data.get('job_title', 'Not specified')
+            skills = resume_data.get('skills', [])
+            
             prompt = f"""
             You are an AI career assistant. Generate a professional summary for a resume based on the person's 
             experience, education, and skills. The summary should be concise (3-5 sentences), highlight key strengths,
@@ -343,45 +388,45 @@ class ResumeViewSet(viewsets.ModelViewSet):
 
             Resume Information:
             -------------------
-            Name: {resume.first_name} {resume.last_name}
-            Job Title: {resume.job_title or "Not specified"}
-            Skills: {", ".join(resume.skills) if resume.skills else "Not specified"}
+            Name: {first_name} {last_name}
+            Job Title: {job_title}
+            Skills: {", ".join(skills) if skills else "Not specified"}
             
             Work Experience:
             """
             
             # Add work experience details
-            work_experiences = resume.work_experiences.all()
+            work_experiences = resume_data.get('work_experiences', [])
             if work_experiences:
                 for i, exp in enumerate(work_experiences):
                     prompt += f"""
-                    {i+1}. {exp.position or "Role"} at {exp.company or "Company"}
-                    Duration: {exp.start_date or "Start date"} to {exp.end_date or "Present"}
-                    Description: {exp.description or "Not provided"}
+                    {i+1}. {exp.get('position', 'Role')} at {exp.get('company', 'Company')}
+                    Duration: {exp.get('start_date', 'Start date')} to {exp.get('end_date', 'Present')}
+                    Description: {exp.get('description', 'Not provided')}
                     """
             else:
                 prompt += "\nNo work experience provided.\n"
             
             # Add education details
-            educations = resume.educations.all()
+            educations = resume_data.get('educations', [])
             prompt += "\nEducation:\n"
             if educations:
                 for i, edu in enumerate(educations):
                     prompt += f"""
-                    {i+1}. {edu.degree or "Degree"} from {edu.school or "School"}
-                    Duration: {edu.start_date or "Start date"} to {edu.end_date or "End date"}
+                    {i+1}. {edu.get('degree', 'Degree')} from {edu.get('school', 'School')}
+                    Duration: {edu.get('start_date', 'Start date')} to {edu.get('end_date', 'End date')}
                     """
             else:
                 prompt += "No education details provided.\n"
             
             # Add projects details if available
-            projects = resume.projects.all()
+            projects = resume_data.get('projects', [])
             if projects:
                 prompt += "\nProjects:\n"
                 for i, proj in enumerate(projects):
                     prompt += f"""
-                    {i+1}. {proj.title or "Project"}
-                    Description: {proj.description or "Not provided"}
+                    {i+1}. {proj.get('title', 'Project')}
+                    Description: {proj.get('description', 'Not provided')}
                     """
             
             prompt += """
@@ -408,9 +453,10 @@ class ResumeViewSet(viewsets.ModelViewSet):
             # Extract summary from response
             summary = message.content[0].text.strip()
             
-            # Update the resume with the generated summary
-            resume.summary = summary
-            resume.save()
+            # Update the resume with the generated summary if authenticated user
+            if save_to_db:
+                resume.summary = summary
+                resume.save()
             
             return Response({
                 "summary": summary
@@ -580,28 +626,78 @@ class WorkExperienceViewSet(viewsets.ModelViewSet):
             raise ValidationError("Invalid resume ID format.")
 
     @extend_schema(
-        request=None, # Explicitly set request body to None
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'position': {
+                        'type': 'string',
+                        'description': 'Job position/title'
+                    },
+                    'company': {
+                        'type': 'string',
+                        'description': 'Company name'
+                    },
+                    'startDate': {
+                        'type': 'string',
+                        'format': 'date',
+                        'description': 'Start date of the position'
+                    },
+                    'endDate': {
+                        'type': 'string',
+                        'format': 'date',
+                        'description': 'End date of the position'
+                    },
+                    'description': {
+                        'type': 'string',
+                        'description': 'Current work experience description to enhance'
+                    }
+                },
+                'required': ['description']
+            }
+        },
         responses={
-            200: OpenApiResponse(description="Enhanced description generated."),
-            404: OpenApiResponse(description="Work experience not found or access denied."),
+            200: OpenApiResponse(
+                description="Enhanced description generated.", 
+                response={'type': 'object', 'properties': {'enhanced_description': {'type': 'string'}}}
+            ),
+            400: OpenApiResponse(description="Invalid input data."),
             500: OpenApiResponse(description="Server error during enhancement.")
         },
-        summary="Enhance work experience description using AI.",
-        description="Takes a work experience ID from the URL path and uses AI to generate an improved description. No request body is needed."
+        summary="Enhance work experience description using AI",
+        description="Takes work experience details and uses AI to generate an improved description. Can be used by either authenticated or non-authenticated users."
     )
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def enhance(self, request, pk=None):
         """
         Enhance work experience description using Claude AI.
-        Requires authentication and ownership.
+        No authentication required. Can accept either:
+        1. A work experience ID (for authenticated users with saved work experiences)
+        2. Complete work experience data in the request body (for all users)
         """
         try:
-            work_exp = self.get_object() # Ensures user owns this work exp via get_queryset
-            
-            # Get context information from the work experience
-            position = work_exp.position or "Not specified"
-            company = work_exp.company or "Not specified"
-            current_description = work_exp.description or ""
+            # Check if work experience data is provided in the request
+            if request.data and 'description' in request.data:
+                # For users sending work experience data directly
+                position = request.data.get('position', "Not specified")
+                company = request.data.get('company', "Not specified")
+                start_date = request.data.get('startDate', "Not specified")
+                end_date = request.data.get('endDate', "Not specified")
+                current_description = request.data.get('description', "")
+            else:
+                # For users with a saved work experience
+                try:
+                    work_exp = self.get_object()
+                    position = work_exp.position or "Not specified"
+                    company = work_exp.company or "Not specified"
+                    start_date = work_exp.start_date or "Not specified"
+                    end_date = work_exp.end_date or "Not specified"
+                    current_description = work_exp.description or ""
+                except (PermissionDenied, WorkExperience.DoesNotExist):
+                    return Response(
+                        {'error': 'You must either provide work experience details or have access to the specified work experience'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             client = get_claude_client()
             
@@ -613,6 +709,7 @@ class WorkExperienceViewSet(viewsets.ModelViewSet):
             
             Position: {position}
             Company: {company}
+            Duration: {start_date} to {end_date}
             Current Description: {current_description}
             
             Provide an enhanced description that:
@@ -638,7 +735,6 @@ class WorkExperienceViewSet(viewsets.ModelViewSet):
             - Highlight leadership and collaboration
             - Keep it to 3-5 bullet points
             - Only return the JSON response, no other text
-  
             """
             
             # Call Claude API
@@ -651,17 +747,37 @@ class WorkExperienceViewSet(viewsets.ModelViewSet):
             )
             
             # Extract enhanced description
-            enhanced_description = message.content[0].text.strip()
+            response_text = message.content[0].text.strip()
             
-            return Response({
-                "enhanced_description": enhanced_description
-            }, status=status.HTTP_200_OK)
+            # Parse the JSON response
+            try:
+                # Try to parse the JSON response from Claude
+                import json
+                response_json = json.loads(response_text)
+                
+                # Get the description value from the response
+                enhanced_description = response_json.get("description", "")
+                
+                # Return only the description value, not nested in another JSON object
+                return Response({
+                    "description": enhanced_description
+                }, status=status.HTTP_200_OK)
+                
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract using regex
+                import re
+                match = re.search(r'"description":\s*"([^"]*)"', response_text)
+                if match:
+                    enhanced_description = match.group(1)
+                    return Response({
+                        "description": enhanced_description
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        "error": "Failed to parse AI response",
+                        "raw_response": response_text
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-        except WorkExperience.DoesNotExist: # Should be handled by get_object permissions
-            return Response(
-                {'error': 'Work experience not found or access denied'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
             # Log the error
             print(f"Error enhancing work experience: {e}")
@@ -714,14 +830,80 @@ class ProjectViewSet(viewsets.ModelViewSet):
             from rest_framework.exceptions import ValidationError
             raise ValidationError("Invalid resume ID format.")
 
-    @action(detail=True, methods=['post'])
+    @extend_schema(
+        request={
+            'application/json': {
+                'type': 'object',
+                'properties': {
+                    'title': {
+                        'type': 'string',
+                        'description': 'Project title'
+                    },
+                    'shortDescription': {
+                        'type': 'string',
+                        'description': 'Brief description of the project'
+                    },
+                    'startDate': {
+                        'type': 'string',
+                        'format': 'date',
+                        'description': 'Start date of the project'
+                    },
+                    'endDate': {
+                        'type': 'string',
+                        'format': 'date',
+                        'description': 'End date of the project'
+                    },
+                    'description': {
+                        'type': 'string',
+                        'description': 'Current project description to enhance'
+                    }
+                },
+                'required': ['description']
+            }
+        },
+        responses={
+            200: OpenApiResponse(
+                description="Enhanced description generated.", 
+                response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
+            ),
+            400: OpenApiResponse(description="Invalid input data."),
+            500: OpenApiResponse(description="Server error during enhancement.")
+        },
+        summary="Enhance project description using AI",
+        description="Takes project details and uses AI to generate an improved description. Can be used by either authenticated or non-authenticated users."
+    )
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def enhance(self, request, pk=None):
-        """ Enhance project description using Claude AI. Requires auth and ownership. """
+        """
+        Enhance project description using Claude AI.
+        No authentication required. Can accept either:
+        1. A project ID (for authenticated users with saved projects)
+        2. Complete project data in the request body (for all users)
+        """
         try:
-            project = self.get_object()
-            # ... (Enhance logic similar to WorkExperience, using project fields) ...
-            title = project.title or "Not specified"
-            current_description = project.description or ""
+            # Check if project data is provided in the request
+            if request.data and 'description' in request.data:
+                # For users sending project data directly
+                title = request.data.get('title', "Not specified")
+                short_description = request.data.get('shortDescription', "")
+                start_date = request.data.get('startDate', "Not specified")
+                end_date = request.data.get('endDate', "Not specified")
+                current_description = request.data.get('description', "")
+            else:
+                # For users with a saved project
+                try:
+                    project = self.get_object()
+                    title = project.title or "Not specified"
+                    # The Project model likely doesn't have a short_description field
+                    short_description = ""
+                    start_date = project.start_date or "Not specified"
+                    end_date = project.end_date or "Not specified"
+                    current_description = project.description or ""
+                except (PermissionDenied, Project.DoesNotExist):
+                    return Response(
+                        {'error': 'You must either provide project details or have access to the specified project'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
             
             client = get_claude_client()
             
@@ -731,6 +913,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
             Make it more impactful, achievement-oriented, and focus on skills demonstrated.
             
             Project Title: {title}
+            Short Description: {short_description}
+            Duration: {start_date} to {end_date}
             Current Description: {current_description}
             
             Provide an enhanced description that:
@@ -740,7 +924,22 @@ class ProjectViewSet(viewsets.ModelViewSet):
             4. Mentions any challenges overcome
             5. Notes the impact or outcomes of the project
             
-            Return only the enhanced description with no additional explanation or markdown.
+            Return the response as a JSON object with a 'description' field containing bullet points with line breaks.
+
+            Example format:
+            {{
+              "description": "• Developed a responsive web application with React and Node.js that streamlined data processing by 40%\\\\n• Implemented RESTful API endpoints that improved system reliability and reduced client-side errors by 35%\\\\n• Engineered a user authentication system with JWT, enhancing security and user experience"
+            }}
+
+            Guidelines:
+            - Start each bullet point with •
+            - Use \\\\n for new lines
+            - Focus on achievements and impact
+            - Use strong action verbs
+            - Include metrics and numbers when possible
+            - Highlight technical skills and problem-solving
+            - Keep it to 3-5 bullet points
+            - Only return the JSON response, no other text
             """
             
             # Call Claude API
@@ -753,21 +952,42 @@ class ProjectViewSet(viewsets.ModelViewSet):
             )
             
             # Extract enhanced description
-            enhanced_description = message.content[0].text.strip()
+            response_text = message.content[0].text.strip()
             
-            return Response({
-                "enhanced_description": enhanced_description
-            }, status=status.HTTP_200_OK)
+            # Parse the JSON response
+            try:
+                # Try to parse the JSON response from Claude
+                import json
+                response_json = json.loads(response_text)
+                
+                # Get the description value from the response
+                enhanced_description = response_json.get("description", "")
+                
+                # Return only the description value, not nested in another JSON object
+                return Response({
+                    "description": enhanced_description
+                }, status=status.HTTP_200_OK)
+                
+            except json.JSONDecodeError:
+                # If JSON parsing fails, try to extract using regex
+                import re
+                match = re.search(r'"description":\s*"([^"]*)"', response_text)
+                if match:
+                    enhanced_description = match.group(1)
+                    return Response({
+                        "description": enhanced_description
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        "error": "Failed to parse AI response",
+                        "raw_response": response_text
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-        except Project.DoesNotExist: # Handled by get_object
-            return Response(
-                {'error': 'Project not found or access denied'},
-                status=status.HTTP_404_NOT_FOUND
-            )
         except Exception as e:
+            # Log the error
             print(f"Error enhancing project: {e}")
             return Response(
-                {'error': 'Failed to enhance project'},
+                {'error': 'Failed to enhance project'}, # Generic error for client
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -2102,3 +2322,298 @@ class SavedCoverLetterViewSet(viewsets.ModelViewSet):
     #    ...
 
     # Default ModelViewSet methods for update/delete will be used, relying on get_queryset for security
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'position': {
+                    'type': 'string',
+                    'description': 'Job position/title'
+                },
+                'company': {
+                    'type': 'string',
+                    'description': 'Company name'
+                },
+                'startDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Start date of the position'
+                },
+                'endDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'End date of the position'
+                },
+                'description': {
+                    'type': 'string',
+                    'description': 'Current work experience description to enhance'
+                }
+            },
+            'required': ['description']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Enhanced description generated.", 
+            response={'type': 'object', 'properties': {'enhanced_description': {'type': 'string'}}}
+        ),
+        400: OpenApiResponse(description="Invalid input data."),
+        500: OpenApiResponse(description="Server error during enhancement.")
+    },
+    summary="Enhance work experience description using AI",
+    description="Takes work experience description and uses AI to generate an improved description. No authentication required."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def enhance_work_experience(request):
+    """API endpoint to enhance a work experience description without requiring an ID."""
+    try:
+        # Validate that description is provided
+        if not request.data or 'description' not in request.data:
+            return Response(
+                {'error': 'You must provide a description to enhance'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        position = request.data.get('position', "Not specified")
+        company = request.data.get('company', "Not specified")
+        start_date = request.data.get('startDate', "Not specified")
+        end_date = request.data.get('endDate', "Not specified")
+        current_description = request.data.get('description', "")
+        
+        client = get_claude_client()
+        
+        # Prepare prompt for Claude
+        prompt = f"""
+        You are an AI career assistant. Enhance the following work experience description for a resume.
+        Make it more impactful, achievement-oriented, and use strong action verbs.
+        Focus on quantifiable achievements and skills demonstrated.
+        
+        Position: {position}
+        Company: {company}
+        Duration: {start_date} to {end_date}
+        Current Description: {current_description}
+        
+        Provide an enhanced description that:
+        1. Starts with strong action verbs
+        2. Includes specific accomplishments with metrics when possible
+        3. Demonstrates skills and impact
+        4. Is concise yet comprehensive
+        5. Is relevant to the position
+        
+        Return the response as a JSON object with a 'description' field containing bullet points with line breaks.
+
+        Example format:
+        {{
+          "description": "• Led development of a full-stack web application using React and Node.js, resulting in 40% faster load times\\\\n• Managed a team of 5 developers, implementing agile methodologies that improved sprint velocity by 25%\\\\n• Architected and deployed microservices infrastructure reducing system downtime by 60%"
+        }}
+
+        Guidelines:
+        - Start each bullet point with •
+        - Use \\n for new lines
+        - Focus on achievements and impact
+        - Use strong action verbs
+        - Include metrics and numbers
+        - Highlight leadership and collaboration
+        - Keep it to 3-5 bullet points
+        - Only return the JSON response, no other text
+        """
+        
+        # Call Claude API
+        message = client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Extract enhanced description
+        response_text = message.content[0].text.strip()
+        
+        # Parse the JSON response
+        try:
+            # Try to parse the JSON response from Claude
+            import json
+            response_json = json.loads(response_text)
+            
+            # Get the description value from the response
+            enhanced_description = response_json.get("description", "")
+            
+            # Return only the description value, not nested in another JSON object
+            return Response({
+                "description": enhanced_description
+            }, status=status.HTTP_200_OK)
+            
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract using regex
+            import re
+            match = re.search(r'"description":\s*"([^"]*)"', response_text)
+            if match:
+                enhanced_description = match.group(1)
+                return Response({
+                    "description": enhanced_description
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "error": "Failed to parse AI response",
+                    "raw_response": response_text
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except Exception as e:
+        # Log the error
+        print(f"Error enhancing work experience: {e}")
+        return Response(
+            {'error': 'Failed to enhance work experience'}, # Generic error for client
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@extend_schema(
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'title': {
+                    'type': 'string',
+                    'description': 'Project title'
+                },
+                'shortDescription': {
+                    'type': 'string',
+                    'description': 'Brief description of the project'
+                },
+                'startDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'Start date of the project'
+                },
+                'endDate': {
+                    'type': 'string',
+                    'format': 'date',
+                    'description': 'End date of the project'
+                },
+                'description': {
+                    'type': 'string',
+                    'description': 'Current project description to enhance'
+                }
+            },
+            'required': ['description']
+        }
+    },
+    responses={
+        200: OpenApiResponse(
+            description="Enhanced description generated.", 
+            response={'type': 'object', 'properties': {'description': {'type': 'string'}}}
+        ),
+        400: OpenApiResponse(description="Invalid input data."),
+        500: OpenApiResponse(description="Server error during enhancement.")
+    },
+    summary="Enhance project description using AI",
+    description="Takes project details and uses AI to generate an improved description. Can be used by either authenticated or non-authenticated users."
+)
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def enhance_project(request):
+    """API endpoint to enhance a project description without requiring an ID."""
+    try:
+        # Validate that description is provided
+        if not request.data or 'description' not in request.data:
+            return Response(
+                {'error': 'You must provide a description to enhance'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        title = request.data.get('title', "Not specified")
+        short_description = request.data.get('shortDescription', "")
+        start_date = request.data.get('startDate', "Not specified")
+        end_date = request.data.get('endDate', "Not specified")
+        current_description = request.data.get('description', "")
+        
+        client = get_claude_client()
+        
+        # Prepare prompt for Claude
+        prompt = f"""
+        You are an AI career assistant. Enhance the following project description for a resume.
+        Make it more impactful, achievement-oriented, and focus on skills demonstrated.
+        
+        Project Title: {title}
+        Short Description: {short_description}
+        Duration: {start_date} to {end_date}
+        Current Description: {current_description}
+        
+        Provide an enhanced description that:
+        1. Clearly explains the project purpose
+        2. Highlights the technologies or methodologies used
+        3. Emphasizes your specific contributions
+        4. Mentions any challenges overcome
+        5. Notes the impact or outcomes of the project
+        
+        Return the response as a JSON object with a 'description' field containing bullet points with line breaks.
+
+        Example format:
+        {{
+          "description": "• Developed a responsive web application with React and Node.js that streamlined data processing by 40%\\\\n• Implemented RESTful API endpoints that improved system reliability and reduced client-side errors by 35%\\\\n• Engineered a user authentication system with JWT, enhancing security and user experience"
+        }}
+
+        Guidelines:
+        - Start each bullet point with •
+        - Use \\n for new lines
+        - Focus on achievements and impact
+        - Use strong action verbs
+        - Include metrics and numbers when possible
+        - Highlight technical skills and problem-solving
+        - Keep it to 3-5 bullet points
+        - Only return the JSON response, no other text
+        """
+        
+        # Call Claude API
+        message = client.messages.create(
+            model="claude-3-7-sonnet-20250219",
+            max_tokens=512,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        # Extract enhanced description
+        response_text = message.content[0].text.strip()
+        
+        # Parse the JSON response
+        try:
+            # Try to parse the JSON response from Claude
+            import json
+            response_json = json.loads(response_text)
+            
+            # Get the description value from the response
+            enhanced_description = response_json.get("description", "")
+            
+            # Return only the description value, not nested in another JSON object
+            return Response({
+                "description": enhanced_description
+            }, status=status.HTTP_200_OK)
+            
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract using regex
+            import re
+            match = re.search(r'"description":\s*"([^"]*)"', response_text)
+            if match:
+                enhanced_description = match.group(1)
+                return Response({
+                    "description": enhanced_description
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    "error": "Failed to parse AI response",
+                    "raw_response": response_text
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+    except Exception as e:
+        # Log the error
+        print(f"Error enhancing project: {e}")
+        return Response(
+            {'error': 'Failed to enhance project'}, # Generic error for client
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

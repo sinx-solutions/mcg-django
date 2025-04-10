@@ -14,7 +14,9 @@ from .views import (
     score_resume,
     job_search_api,
     generate_cover_letter,
-    SavedCoverLetterViewSet
+    SavedCoverLetterViewSet,
+    enhance_work_experience,
+    enhance_project
 )
 
 # Create a router and register our viewsets
@@ -37,4 +39,6 @@ urlpatterns = [
     path('resumes/<uuid:resume_id>/score/', score_resume, name='score-resume'),
     path('job-search/', job_search_api, name='job_search_api'),
     path('generate-cover-letter/', generate_cover_letter, name='generate-cover-letter'),
+    path('enhance-work-experience/', enhance_work_experience, name='enhance-work-experience'),
+    path('enhance-project/', enhance_project, name='enhance-project'),
 ]
